@@ -148,11 +148,12 @@
   <section class="intake" id="aiPublishSection">
     <p class="step-label">Or — any files, straight to Confluence, via your Claude API</p>
     <p class="hint" style="margin:0 0 14px;">
-      Drop any project files (SOW, order form, dealbook, notes — anything). Claude drafts a
-      multi-page Confluence project space from them. <strong>Nothing is written to Confluence
-      until you review and, if needed, correct each draft below</strong> — this is AI
-      extraction, not guaranteed-accurate OCR, and it can misread a number or a name on messy
-      or unusual documents.
+      Drop any project files (SOW, order form, dealbook, notes — anything). Claude reads them
+      and creates a multi-page Confluence project space directly using your Atlassian
+      connector — one click, no intermediate review step.
+      <strong>This is still AI extraction, not guaranteed-accurate OCR</strong> — it can
+      misread a number or a name on messy or unusual documents, so check the created pages
+      (linked below once done) against the source documents.
     </p>
     <p class="hint" style="margin:0 0 14px; background:#eef4ee; border-left:4px solid var(--ok); padding:8px 12px;">
       <strong>Self-hosted.</strong> This calls <code>/api/draft</code> and
@@ -173,16 +174,12 @@
       </label>
     </div>
     <div class="actions">
-      <button id="aiDraftBtn">1. Generate drafts (no writes yet)</button>
+      <button id="aiPublishBtn">Generate &amp; publish to Confluence</button>
       <span class="status-line" id="aiStatusLine"></span>
-    </div>
-    <div id="aiDrafts" style="margin-top:18px;"></div>
-    <div class="actions" id="aiPublishRow" style="display:none;">
-      <button id="aiPublishBtn">2. Publish reviewed drafts to Confluence</button>
-      <span class="status-line" id="aiPublishStatusLine"></span>
     </div>
     <div id="aiResults" style="margin-top:16px; font-size:13px;"></div>
   </section>
+
 
   <section id="output">
     <p class="step-label">Step 2 — review, then copy into Confluence</p>
@@ -390,6 +387,38 @@ async function extractXlsx(file) {
 // Tuned to Mark43's standard Order Form / SOW / Dealbook layout. Regex-based,
 // not semantic — it finds known codes, dollar figures, and dates rather than
 // "understanding" the documents, so treat every result as a lead to verify.
+
+// Authoritative product catalog (Mark43 Product SKUs sheet — given directly, not
+// inferred) — used for canonical names AND to explain *why* something might look like
+// a mismatch (e.g. a pre-GA product a rep is tracking as an upsell, not a sold item).
+const SKU_CATALOG = {
+  'RMS 1': { name: 'RMS Report Writing', availability: 'Available', upsell: null },
+  'RMS 2': { name: 'Case Management', availability: 'Available', upsell: null },
+  'RMS 3': { name: 'Property and Evidence', availability: 'Available', upsell: null },
+  'RMS 4': { name: 'RMS Warrants Module', availability: 'Available', upsell: null },
+  'RMS 7': { name: 'RMS Fillable PDFs', availability: 'Available', upsell: null },
+  'RMS 11': { name: 'Booking Module', availability: 'Available', upsell: 'For PDs holding individuals short-term' },
+  'RMS 12': { name: 'RMS Crash', availability: 'PRE-GA \u2014 sales launch in 2026, select markets only (shared Jan \'26 pre-SKO)', upsell: 'Yes' },
+  'RMS 13': { name: 'RMS eCitations', availability: 'Launched for Sales Oct \'25 \u2014 TX/CA begin Q4 2025, other select markets 2026', upsell: 'Yes' },
+  'REPORTAI': { name: 'ReportAI', availability: 'Launched for Sales Oct \'25', upsell: 'Yes' },
+  'BRIEFAI': { name: 'BriefAI', availability: 'Launched for Sales Oct \'25', upsell: 'Yes' },
+  'CAD 1': { name: 'CAD Dispatcher/Call-Taker', availability: 'Available', upsell: null },
+  'CAD 2': { name: 'LE First Responder', availability: 'Available', upsell: null },
+  'CAD 3': { name: 'Fire First Responder', availability: 'Available', upsell: null },
+  'CAD 6': { name: 'Alternate CAD', availability: 'Available', upsell: 'Yes' },
+  'MOB 1 RMS': { name: 'OnScene Mobile Application for RMS', availability: 'Available', upsell: 'Yes' },
+  'MOB 1 CAD': { name: 'OnScene Mobile Application for CAD', availability: 'Available', upsell: 'Yes' },
+  'MOB 3 CAD': { name: 'CarPlay', availability: 'Available', upsell: 'Yes' },
+  'DEX 1': { name: 'CAD Data Exchange', availability: 'Available', upsell: 'Yes' },
+  'UNV 1': { name: 'Universal Search', availability: 'Launched for Sales Oct \'25 \u2014 select market availability begins Dec 2025', upsell: 'Yes' },
+  'INS INF': { name: 'Mark43 Insights Informed', availability: 'Available', upsell: 'Yes' },
+  'INS ADT': { name: 'Insights Additional Tenant Management', availability: 'Available', upsell: 'Yes' },
+  'DLK 1': { name: 'Data Lake \u2013 Base', availability: 'Available', upsell: 'Yes' },
+  'DLK 2': { name: 'Data Lake \u2013 Dedicated', availability: 'Available', upsell: 'Yes' },
+  'DLK 7': { name: 'Data Lake \u2013 Restricted', availability: 'Available', upsell: 'Yes' },
+  'SEC FRT': { name: 'Mark43 Fortified', availability: 'Launched for Sales Oct \'25', upsell: '10% of ARR' },
+  'SEC SCIM': { name: 'SCIM', availability: 'Launched for Sales Oct \'25', upsell: 'Yes' },
+};
 
 const SKU_LABELS = {
   'RMS 1': 'RMS Reports Writing', 'RMS 2': 'Case Management', 'RMS 3': 'Property and Evidence',
@@ -1465,13 +1494,7 @@ function buildSummary(orderFormText, sowText, dealbookText) {
 
   const products = codeProducts.concat(seStandalone);
 
-  const discrepancies = [
-    {
-      severity: 'info',
-      title: 'How to read these flags',
-      detail: 'Generated by pattern-matching known Mark43 document formats — codes and dates, not dollar figures — and not by reading for meaning. Verify anything below before treating it as fact.',
-    },
-  ];
+  const discrepancies = [];
 
   // The whole point of comparing three independent documents: surface every place they
   // actively disagree, front and center, not buried in a table column that's easy to skim past.
@@ -2008,7 +2031,15 @@ async function callClaude(userText, opts) {
   });
   const data = await resp.json().catch(() => null);
   if (!resp.ok) {
-    throw new Error((data && data.error) || ('Server error ' + resp.status));
+    // Anthropic's real error often lives a level deeper than the summary string server.js
+    // puts in `error` — surface all of it so a vague message like "the string did not match
+    // the expected pattern" comes with enough detail to actually find the offending field.
+    const anthropicDetail = data && data.details && data.details.error;
+    const fullMessage = [
+      (data && data.error) || ('Server error ' + resp.status),
+      anthropicDetail ? '(' + (anthropicDetail.type || 'detail') + ': ' + (anthropicDetail.message || JSON.stringify(anthropicDetail)) + ')' : '',
+    ].filter(Boolean).join(' ');
+    throw new Error(fullMessage);
   }
   return data;
 }
@@ -2033,79 +2064,70 @@ function parseCreatedPage(block) {
 
 const ACCURACY_RULE = 'Only state facts that literally appear in the source text below \u2014 ' +
   'never infer, guess, or fill in a plausible-sounding name, date, or number. Where the ' +
-  'source text doesn\u2019t say, write "not found in source documents" instead. Where you are ' +
-  'fairly confident but the wording is indirect, mark it with [VERIFY] so a human knows to ' +
-  'double-check it against the source.';
-
-const RETURN_FORMAT_RULE = 'Return ONLY the Confluence storage-format HTML body content ' +
-  '(the stuff that goes inside <body> \u2014 headings, tables, lists). No markdown code fences, ' +
-  'no explanation before or after, no <html>/<head>/<body> wrapper tags, no commentary.';
+  'source text doesn\u2019t say, write "not found in source documents" instead.';
 
 const AI_SECTIONS = [
   {
-    key: 'overview',
     label: 'Project Overview',
-    draftPrompt: (ctx) => 'Draft the body content for a Confluence project overview page titled ' +
-      '"' + ctx.projectTitle + '".\n' +
-      'Include: a project/deal snapshot table (customer/agency name, contract or order form ' +
-      'number, product scope, key dates, contract term, who signed) and a "Key Stakeholders" ' +
-      'table for every party named in the documents.\n' + ACCURACY_RULE + '\n' + RETURN_FORMAT_RULE +
+    prompt: (ctx) => 'Create ONE Confluence page using the createConfluencePage tool.\n' +
+      'spaceId: "' + ctx.spaceKey + '" (this is a space key, which the tool also accepts as spaceId)\n' +
+      'title: "' + ctx.projectTitle + '"\n' +
+      'contentFormat: "html"\n' +
+      'Body: a project/deal snapshot table (customer/agency name, contract or order form number, ' +
+      'product scope, key dates, contract term, who signed) and a "Key Stakeholders" table for ' +
+      'both parties, built only from what appears in the source documents below.\n' + ACCURACY_RULE +
       '\n\nSOURCE DOCUMENTS:\n' + ctx.sourceText,
   },
   {
-    key: 'scope',
     label: 'Scope of Services & Deliverables',
-    draftPrompt: (ctx) => 'Draft the body content for a Confluence child page titled ' +
-      '"' + ctx.projectTitle + ' \u2013 Scope of Services & Deliverables".\n' +
-      'Include every product, module, and service explicitly named in the source documents ' +
-      '(tables/lists), with what is included for each.\n' + ACCURACY_RULE + '\n' + RETURN_FORMAT_RULE +
+    prompt: (ctx) => 'Create a Confluence CHILD page using the createConfluencePage tool.\n' +
+      'spaceId: "' + ctx.spaceKey + '", parentId: "' + ctx.parentId + '"\n' +
+      'title: "' + ctx.projectTitle + ' \u2013 Scope of Services & Deliverables"\n' +
+      'contentFormat: "html"\n' +
+      'Body: every product, module, and service explicitly named in the source documents ' +
+      '(tables/lists), with what is included for each.\n' + ACCURACY_RULE +
       '\n\nSOURCE DOCUMENTS:\n' + ctx.sourceText,
   },
   {
-    key: 'timeline',
     label: 'Timeline & Phases',
-    draftPrompt: (ctx) => 'Draft the body content for a Confluence child page titled ' +
-      '"' + ctx.projectTitle + ' \u2013 Timeline & Phases".\n' +
-      'Include project phases, milestones, durations, and dates explicitly stated in the source ' +
+    prompt: (ctx) => 'Create a Confluence CHILD page using the createConfluencePage tool.\n' +
+      'spaceId: "' + ctx.spaceKey + '", parentId: "' + ctx.parentId + '"\n' +
+      'title: "' + ctx.projectTitle + ' \u2013 Timeline & Phases"\n' +
+      'contentFormat: "html"\n' +
+      'Body: project phases, milestones, durations, and dates explicitly stated in the source ' +
       'documents. If none exist, say so plainly rather than inventing a schedule.\n' + ACCURACY_RULE +
-      '\n' + RETURN_FORMAT_RULE + '\n\nSOURCE DOCUMENTS:\n' + ctx.sourceText,
-  },
-  {
-    key: 'migration',
-    label: 'Data Migration',
-    draftPrompt: (ctx) => 'Draft the body content for a Confluence child page titled ' +
-      '"' + ctx.projectTitle + ' \u2013 Data Migration".\n' +
-      'Include data migration types, legacy systems, scope, and any explicit rules/defaults/' +
-      'exclusions stated in the source documents. If there is no migration content, say so ' +
-      'briefly rather than omitting the page.\n' + ACCURACY_RULE + '\n' + RETURN_FORMAT_RULE +
       '\n\nSOURCE DOCUMENTS:\n' + ctx.sourceText,
   },
   {
-    key: 'roles',
+    label: 'Data Migration',
+    prompt: (ctx) => 'Create a Confluence CHILD page using the createConfluencePage tool.\n' +
+      'spaceId: "' + ctx.spaceKey + '", parentId: "' + ctx.parentId + '"\n' +
+      'title: "' + ctx.projectTitle + ' \u2013 Data Migration"\n' +
+      'contentFormat: "html"\n' +
+      'Body: data migration types, legacy systems, scope, and any explicit rules/defaults/' +
+      'exclusions stated in the source documents. If there is no migration content, create the ' +
+      'page saying so briefly rather than omitting it.\n' + ACCURACY_RULE +
+      '\n\nSOURCE DOCUMENTS:\n' + ctx.sourceText,
+  },
+  {
     label: 'Roles & Responsibilities',
-    draftPrompt: (ctx) => 'Draft the body content for a Confluence child page titled ' +
-      '"' + ctx.projectTitle + ' \u2013 Roles & Responsibilities".\n' +
-      'Include a table of named roles and responsibilities for every party, exactly as stated ' +
-      'in the source documents.\n' + ACCURACY_RULE + '\n' + RETURN_FORMAT_RULE +
+    prompt: (ctx) => 'Create a Confluence CHILD page using the createConfluencePage tool.\n' +
+      'spaceId: "' + ctx.spaceKey + '", parentId: "' + ctx.parentId + '"\n' +
+      'title: "' + ctx.projectTitle + ' \u2013 Roles & Responsibilities"\n' +
+      'contentFormat: "html"\n' +
+      'Body: a table of named roles and responsibilities for every party, exactly as stated in ' +
+      'the source documents.\n' + ACCURACY_RULE +
       '\n\nSOURCE DOCUMENTS:\n' + ctx.sourceText,
   },
 ];
 
-let aiCtx = null; // { spaceKey, projectTitle, sourceText } set on draft generation
-
-// Strips accidental ```html fences in case the model adds them despite instructions.
-function stripFences(s) {
-  return String(s ?? '').replace(/^```(?:html)?\s*/i, '').replace(/```\s*$/i, '').trim();
-}
-
-document.getElementById('aiDraftBtn').addEventListener('click', async () => {
+document.getElementById('aiPublishBtn').addEventListener('click', async () => {
   const statusLine = document.getElementById('aiStatusLine');
-  const draftsEl = document.getElementById('aiDrafts');
+  const resultsEl = document.getElementById('aiResults');
   const spaceKey = document.getElementById('aiSpaceKey').value.trim();
   const projectTitle = document.getElementById('aiProjectTitle').value.trim();
-  draftsEl.innerHTML = '';
-  document.getElementById('aiPublishRow').style.display = 'none';
-  document.getElementById('aiResults').innerHTML = '';
+  resultsEl.innerHTML = '';
+  const log = (html) => { resultsEl.innerHTML += html; };
 
   const readable = aiFilesState.filter((f) => f.text);
   if (!readable.length) {
@@ -2118,108 +2140,60 @@ document.getElementById('aiDraftBtn').addEventListener('click', async () => {
     statusLine.textContent = 'Enter both a Confluence space key and a project title.';
     return;
   }
+  if (/^\d+$/.test(spaceKey)) {
+    log('<div class="flag"><strong>Heads up:</strong> "' + esc(spaceKey) + '" looks like a numeric ' +
+      'space ID, not a space key. Confluence space keys are normally letters (e.g. <code>PMO</code>) ' +
+      '— trying anyway, but if this lands in the wrong place, check Confluence\u2019s space settings ' +
+      'for the actual key.</div>');
+  }
+
+  // PDF/OCR extraction can leave control characters or unpaired surrogate code points in the
+  // text (confirmed on these Mark43 SOW templates: appendix bullets sometimes come through as
+  // stray Unicode glyphs like \u2209/\u2284/\u2260 due to a font-encoding quirk in the PDF).
+  // Anthropic's API can reject the entire request over this with a generic "string did not
+  // match the expected pattern" error — stripping non-printable/invalid characters up front
+  // avoids sending something malformed in the first place.
+  function sanitizeExtractedText(s) {
+    return String(s || '')
+      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '') // control chars, keep \n \t
+      .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/g, '') // lone high surrogate
+      .replace(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, ''); // lone low surrogate
+  }
 
   const sourceText = readable
-    .map((f) => '--- ' + f.name + ' ---\n' + f.text)
+    .map((f) => '--- ' + f.name + ' ---\n' + sanitizeExtractedText(f.text))
     .join('\n\n')
     .slice(0, 100000); // keep the request bounded; extremely long dumps get truncated
 
-  aiCtx = { spaceKey, projectTitle, sourceText };
-
-  for (let i = 0; i < AI_SECTIONS.length; i++) {
-    const section = AI_SECTIONS[i];
-    statusLine.className = 'status-line';
-    statusLine.textContent = 'Drafting ' + section.label + '\u2026 (' + (i + 1) + '/' + AI_SECTIONS.length + ')';
-    const box = document.createElement('div');
-    box.style.marginBottom = '16px';
-    box.innerHTML = '<h3 style="font-size:14px;color:var(--navy-deep);margin:0 0 6px;">' + esc(section.label) + '</h3>' +
-      '<textarea data-section="' + section.key + '" style="width:100%;min-height:160px;font-family:\'Courier New\',monospace;font-size:12px;border:1px solid var(--rule);padding:8px;background:#fbfaf6;" placeholder="drafting\u2026"></textarea>';
-    draftsEl.appendChild(box);
-    const textarea = box.querySelector('textarea');
-    try {
-      const resp = await callClaude(section.draftPrompt(aiCtx)); // no mcp_servers — text only, nothing written anywhere
-      textarea.value = stripFences(textOf(resp));
-    } catch (err) {
-      textarea.value = '';
-      textarea.placeholder = 'Draft failed: ' + err.message + ' \u2014 you can type content in by hand or retry.';
-    }
-  }
-
-  statusLine.textContent = 'Drafts ready \u2014 read and edit each one, then publish.';
-  document.getElementById('aiPublishRow').style.display = 'flex';
-});
-
-document.getElementById('aiPublishBtn').addEventListener('click', async () => {
-  const statusLine = document.getElementById('aiPublishStatusLine');
-  const resultsEl = document.getElementById('aiResults');
-  resultsEl.innerHTML = '';
-  const log = (html) => { resultsEl.innerHTML += html; };
-
-  if (!aiCtx) {
-    statusLine.className = 'status-line error';
-    statusLine.textContent = 'Generate drafts first.';
-    return;
-  }
-  const ctx = Object.assign({}, aiCtx);
-  const bodies = {};
-  document.querySelectorAll('#aiDrafts textarea').forEach((ta) => {
-    bodies[ta.dataset.section] = ta.value;
-  });
-  if (!bodies.overview || !bodies.overview.trim()) {
-    statusLine.className = 'status-line error';
-    statusLine.textContent = 'The Project Overview draft is empty \u2014 fill it in or regenerate before publishing.';
-    return;
-  }
+  const ctx = { spaceKey, projectTitle, sourceText };
 
   statusLine.className = 'status-line';
-  statusLine.textContent = 'Publishing Project Overview\u2026';
-
-  // Publish calls are deliberately mechanical: "create a page with exactly this body" is an
-  // instruction-following task, not a generation task, so there's much less room for the
-  // model to drift from what was reviewed in the textarea above.
-  const publishPrompt = (title, body, parentId) =>
-    'Use the createConfluencePage tool to create a page.\n' +
-    'spaceId: "' + ctx.spaceKey + '" (a space key, which the tool also accepts as spaceId)\n' +
-    (parentId ? 'parentId: "' + parentId + '"\n' : '') +
-    'title: "' + title + '"\n' +
-    'contentFormat: "html"\n' +
-    'Use EXACTLY this body content, verbatim, with no changes:\n\n' + body;
+  statusLine.textContent = 'Creating overview page\u2026';
 
   try {
-    const overviewResp = await callClaude(
-      publishPrompt(ctx.projectTitle, bodies.overview),
-      { publish: true }
-    );
+    const overviewResp = await callClaude(AI_SECTIONS[0].prompt(ctx), { publish: true });
     const created = toolResultsOf(overviewResp).map(parseCreatedPage).find(Boolean);
     const modelText = textOf(overviewResp);
 
     if (!created) {
       statusLine.className = 'status-line error';
       statusLine.textContent = 'Claude didn\u2019t create the page \u2014 see details below.';
-      log('<div class="flag"><strong>Project Overview \u2014 not created.</strong><br>' +
-        esc(modelText || 'No tool call and no text response. Check that the Atlassian connector is ' +
-          'connected and that the space key is correct.') + '</div>');
+      log('<div class="flag"><strong>' + esc(AI_SECTIONS[0].label) + ' \u2014 not created.</strong><br>' +
+        esc(modelText || 'No tool call and no text response. Check ATLASSIAN_OAUTH_TOKEN is set on ' +
+          'the server and that the space key is correct.') + '</div>');
       return;
     }
 
-    log('<div class="flag info"><strong>\u2713 Project Overview</strong> \u2014 ' +
+    log('<div class="flag info"><strong>\u2713 ' + esc(AI_SECTIONS[0].label) + '</strong> \u2014 ' +
       (created.url ? '<a href="' + esc(created.url) + '" target="_blank">' + esc(created.url) + '</a>' : 'created (id ' + esc(created.id) + ')') +
       '</div>');
+    ctx.parentId = created.id;
 
-    const childSections = AI_SECTIONS.slice(1);
-    for (let i = 0; i < childSections.length; i++) {
-      const section = childSections[i];
-      const body = bodies[section.key];
-      statusLine.textContent = 'Publishing ' + section.label + '\u2026 (' + (i + 1) + '/' + childSections.length + ')';
-      if (!body || !body.trim()) {
-        log('<div class="flag"><strong>' + esc(section.label) + ' \u2014 skipped.</strong><br>Draft was empty.</div>');
-        continue;
-      }
+    for (let i = 1; i < AI_SECTIONS.length; i++) {
+      const section = AI_SECTIONS[i];
+      statusLine.textContent = 'Creating ' + section.label + '\u2026 (' + i + '/' + (AI_SECTIONS.length - 1) + ')';
       try {
-        const resp = await callClaude(
-          publishPrompt(ctx.projectTitle + ' \u2013 ' + section.label, body, created.id),
-          { publish: true }
-        );
+        const resp = await callClaude(section.prompt(ctx), { publish: true });
         const page = toolResultsOf(resp).map(parseCreatedPage).find(Boolean);
         const text = textOf(resp);
         if (page) {
@@ -2235,7 +2209,7 @@ document.getElementById('aiPublishBtn').addEventListener('click', async () => {
       }
     }
 
-    statusLine.textContent = 'Done. Since you reviewed the drafts before publishing, these should match what you approved \u2014 spot-check the live pages anyway.';
+    statusLine.textContent = 'Done \u2014 review every linked page against the source documents before treating it as final.';
   } catch (err) {
     console.error(err);
     statusLine.className = 'status-line error';
