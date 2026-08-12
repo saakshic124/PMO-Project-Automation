@@ -9,13 +9,15 @@ const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
 const MODEL = process.env.ANTHROPIC_MODEL || 'claude-sonnet-5';
 const MAX_TOKENS = parseInt(process.env.MAX_TOKENS || '4096', 10);
 
-// Current Anthropic MCP connector spec (verified against platform.claude.com docs,
-// Aug 2026): beta header is mcp-client-2025-11-20, and tool enablement lives in a
-// separate `tools` array as an MCPToolset object — NOT inline on the server definition
-// like the older, now-deprecated mcp-client-2025-04-04 header used.
-const MCP_BETA_HEADER = 'mcp-client-2025-11-20';
-const ATLASSIAN_MCP_URL = process.env.ATLASSIAN_MCP_URL || 'https://mcp.atlassian.com/v1/mcp';
-const ATLASSIAN_OAUTH_TOKEN = process.env.ATLASSIAN_OAUTH_TOKEN || '';
+// Confluence auth: a plain Atlassian API token (from id.atlassian.com/manage-profile/security/api-tokens)
+// used as HTTP Basic Auth (email + token) directly against Confluence's own REST API v2.
+// Deliberately NOT using Anthropic's MCP connector for this — that path requires an OAuth
+// Bearer token obtained via a local OAuth flow (needs Node + a browser hitting localhost on
+// the same machine), which isn't viable on a locked-down machine with no Terminal access.
+// A static API token needs nothing but a web browser to generate.
+const ATLASSIAN_SITE = process.env.ATLASSIAN_SITE || ''; // e.g. "mark43.atlassian.net"
+const ATLASSIAN_EMAIL = process.env.ATLASSIAN_EMAIL || '';
+const ATLASSIAN_API_TOKEN = process.env.ATLASSIAN_API_TOKEN || '';
 
 if (!ANTHROPIC_API_KEY) {
   console.error(
@@ -24,17 +26,72 @@ if (!ANTHROPIC_API_KEY) {
   );
 }
 
-async function anthropicRequest(payload, { beta } = {}) {
-  const headers = {
-    'Content-Type': 'application/json',
-    'x-api-key': ANTHROPIC_API_KEY,
-    'anthropic-version': '2023-06-01',
-  };
-  if (beta) headers['anthropic-beta'] = beta;
+function confluenceConfigured() {
+  return !!(ATLASSIAN_SITE && ATLASSIAN_EMAIL && ATLASSIAN_API_TOKEN);
+}
 
+function confluenceAuthHeader() {
+  const raw = ATLASSIAN_EMAIL + ':' + ATLASSIAN_API_TOKEN;
+  return 'Basic ' + Buffer.from(raw, 'utf8').toString('base64');
+}
+
+async function confluenceRequest(pathSuffix, options = {}) {
+  const url = 'https://' + ATLASSIAN_SITE + '/wiki/api/v2' + pathSuffix;
+  const resp = await fetch(url, {
+    method: options.method || 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: confluenceAuthHeader(),
+    },
+    body: options.body ? JSON.stringify(options.body) : undefined,
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    const err = new Error(
+      (data && data.errors && data.errors[0] && data.errors[0].title) ||
+      ('Confluence API error ' + resp.status)
+    );
+    err.status = resp.status;
+    err.data = data;
+    throw err;
+  }
+  return data;
+}
+
+// A space "key" (e.g. "PMO") or personal space key (e.g. "~712020abc...") both need
+// resolving to Confluence's internal numeric space ID before the create-page endpoint will
+// accept them. If the input is already numeric, skip the lookup.
+async function resolveSpaceId(spaceKeyOrId) {
+  if (/^\d+$/.test(spaceKeyOrId)) return spaceKeyOrId;
+  const data = await confluenceRequest('/spaces?keys=' + encodeURIComponent(spaceKeyOrId) + '&limit=1');
+  const match = data.results && data.results[0];
+  if (!match) throw new Error('No Confluence space found for key "' + spaceKeyOrId + '".');
+  return match.id;
+}
+
+async function confluenceCreatePage({ title, spaceKeyOrId, parentId, bodyHtml }) {
+  const spaceId = await resolveSpaceId(spaceKeyOrId);
+  const payload = {
+    spaceId,
+    status: 'current',
+    title,
+    body: { representation: 'storage', value: bodyHtml },
+  };
+  if (parentId) payload.parentId = parentId;
+  const page = await confluenceRequest('/pages', { method: 'POST', body: payload });
+  const webui = page._links && page._links.webui;
+  const base = (page._links && page._links.base) || ('https://' + ATLASSIAN_SITE + '/wiki');
+  return { id: page.id, title: page.title, url: webui ? base + webui : null };
+}
+
+async function anthropicRequest(payload) {
   const resp = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
-    headers,
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+    },
     body: JSON.stringify(payload),
   });
   const data = await resp.json().catch(() => ({}));
@@ -47,75 +104,79 @@ async function anthropicRequest(payload, { beta } = {}) {
   return data;
 }
 
-// ---- Draft: plain text generation. No tools attached — nothing is written anywhere. ----
+function textOf(data) {
+  return (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n');
+}
+
+function stripFences(s) {
+  return String(s ?? '').replace(/^```(?:html|xml)?\s*/i, '').replace(/```\s*$/i, '').trim();
+}
+
+// ---- Draft: plain text generation, no Confluence write. Useful standalone, and also what
+// ---- /api/publish-page calls internally before it writes anything. ----
+async function draftText(prompt) {
+  const data = await anthropicRequest({
+    model: MODEL,
+    max_tokens: MAX_TOKENS,
+    messages: [{ role: 'user', content: prompt }],
+  });
+  return stripFences(textOf(data));
+}
+
 app.post('/api/draft', async (req, res) => {
   const { prompt } = req.body || {};
   if (!prompt || typeof prompt !== 'string') {
     return res.status(400).json({ error: 'Missing "prompt" string in request body.' });
   }
   try {
-    const data = await anthropicRequest({
-      model: MODEL,
-      max_tokens: MAX_TOKENS,
-      messages: [{ role: 'user', content: prompt }],
-    });
-    res.json(data);
+    const text = await draftText(prompt);
+    res.json({ text });
   } catch (err) {
     console.error('draft error:', err.data || err.message);
     res.status(err.status || 500).json({ error: err.message, details: err.data });
   }
 });
 
-// ---- Publish: attaches the Atlassian MCP connector server-side. The client sends the ----
-// ---- exact, human-reviewed page content; it never sees or controls the OAuth token. ----
-app.post('/api/publish', async (req, res) => {
-  const { prompt } = req.body || {};
-  if (!prompt || typeof prompt !== 'string') {
-    return res.status(400).json({ error: 'Missing "prompt" string in request body.' });
+// ---- Publish: draft the page body with Claude, then create it directly via Confluence's ----
+// ---- own REST API using a static API token. No MCP connector, no OAuth flow. ----
+app.post('/api/publish-page', async (req, res) => {
+  const { title, spaceKeyOrId, parentId, prompt } = req.body || {};
+  if (!title || !spaceKeyOrId || !prompt) {
+    return res.status(400).json({ error: 'Missing "title", "spaceKeyOrId", or "prompt" in request body.' });
   }
-  if (!ATLASSIAN_OAUTH_TOKEN) {
+  if (!confluenceConfigured()) {
     return res.status(412).json({
-      error: 'ATLASSIAN_OAUTH_TOKEN is not configured on this server. See README.md \u2014 ' +
-        '"Getting an Atlassian OAuth token" \u2014 before this button will work.',
+      error: 'ATLASSIAN_SITE / ATLASSIAN_EMAIL / ATLASSIAN_API_TOKEN are not fully configured on ' +
+        'this server. See README.md \u2014 "Getting an Atlassian API token" \u2014 before this button will work.',
     });
   }
   try {
-    const data = await anthropicRequest(
-      {
-        model: MODEL,
-        max_tokens: MAX_TOKENS,
-        messages: [{ role: 'user', content: prompt }],
-        mcp_servers: [
-          {
-            type: 'url',
-            url: ATLASSIAN_MCP_URL,
-            name: 'atlassian-mcp',
-            authorization_token: ATLASSIAN_OAUTH_TOKEN,
-          },
-        ],
-        tools: [{ type: 'mcp_toolset', mcp_server_name: 'atlassian-mcp' }],
-      },
-      { beta: MCP_BETA_HEADER }
-    );
-    res.json(data);
+    const bodyHtml = await draftText(prompt);
+    if (!bodyHtml.trim()) {
+      return res.status(502).json({ error: 'Claude returned an empty draft \u2014 nothing was sent to Confluence.' });
+    }
+    const page = await confluenceCreatePage({ title, spaceKeyOrId, parentId, bodyHtml });
+    res.json(page);
   } catch (err) {
-    console.error('publish error:', err.data || err.message);
+    console.error('publish-page error:', err.data || err.message);
     res.status(err.status || 500).json({ error: err.message, details: err.data });
   }
 });
 
 // ---- Placeholder for the next step: Mark43 API integration. ----
-// Nothing real here yet — fill in routes/mark43.js once you have Mark43 API
-// credentials/docs (e.g. pulling tenant data to cross-reference against a SOW, or
-// pushing the generated project summary into a Mark43-side record).
 app.use('/api/mark43', require('./routes/mark43'));
 
-app.get('/health', (req, res) => res.json({ ok: true, model: MODEL, hasKey: !!ANTHROPIC_API_KEY }));
+app.get('/health', (req, res) => res.json({
+  ok: true,
+  model: MODEL,
+  hasAnthropicKey: !!ANTHROPIC_API_KEY,
+  confluenceConfigured: confluenceConfigured(),
+}));
 
 app.use(express.static(path.join(__dirname, 'public')));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log('Project Summary Builder listening on port ' + PORT);
-  console.log('Model: ' + MODEL + ' | Atlassian token configured: ' + !!ATLASSIAN_OAUTH_TOKEN);
+  console.log('Model: ' + MODEL + ' | Confluence configured: ' + confluenceConfigured());
 });
