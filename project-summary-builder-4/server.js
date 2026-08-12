@@ -151,22 +151,30 @@ async function draftText(prompt) {
   });
   const text = stripFences(textOf(data));
   if (!text.trim()) {
+    const blockTypes = (data.content || []).map((b) => b.type);
     // Don't fail silently: log everything useful about why Claude's response had
     // no usable text, so this is diagnosable from Render logs instead of showing
     // up as a mysteriously empty box in the browser with no error anywhere.
     console.error(
       'draftText: Claude returned no usable text.',
-      JSON.stringify({
-        promptChars: fullPrompt.length,
-        stopReason: data.stop_reason,
-        usage: data.usage,
-        contentBlockTypes: (data.content || []).map((b) => b.type),
-      })
+      JSON.stringify({ promptChars: fullPrompt.length, stopReason: data.stop_reason, usage: data.usage, contentBlockTypes: blockTypes })
     );
-    const reasonHint =
-      data.stop_reason === 'max_tokens'
-        ? ' The model hit the MAX_TOKENS limit before producing any output \u2014 try raising MAX_TOKENS (currently ' + MAX_TOKENS + ') in your environment variables.'
-        : ' Check the server logs for the raw Anthropic response (stop_reason: ' + data.stop_reason + ').';
+    let reasonHint;
+    if (data.stop_reason === 'max_tokens' && blockTypes.length && !blockTypes.includes('text')) {
+      // The entire max_tokens budget was consumed by non-text content (most likely
+      // extended thinking) before the model ever got to writing the page itself.
+      // Thinking tokens and output tokens draw from the same max_tokens pool, so
+      // raising max_tokens (not just a little) is the actual fix here, not a prompt bug.
+      reasonHint =
+        ' The model spent its entire MAX_TOKENS budget (' + MAX_TOKENS + ') on internal reasoning ' +
+        '(content blocks returned: [' + blockTypes.join(', ') + ']) and never got to writing actual ' +
+        'output. This happens on large/complex source sets \u2014 raise MAX_TOKENS substantially ' +
+        '(try 16000, then higher if it recurs) since reasoning and output share the same budget.';
+    } else if (data.stop_reason === 'max_tokens') {
+      reasonHint = ' The model hit the MAX_TOKENS limit (' + MAX_TOKENS + ') before producing any output \u2014 try raising MAX_TOKENS.';
+    } else {
+      reasonHint = ' Content block types returned: [' + blockTypes.join(', ') + ']. stop_reason: ' + data.stop_reason + '. Check server logs for the full response.';
+    }
     const err = new Error('Claude returned an empty draft.' + reasonHint);
     err.status = 502;
     throw err;
