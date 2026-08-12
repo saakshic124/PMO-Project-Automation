@@ -165,7 +165,7 @@
     <div id="aiFileList" style="font-size:12px;color:var(--slate);margin:10px 0;"></div>
     <div style="display:flex; gap:18px; margin-top:6px; flex-wrap:wrap;">
       <label style="font-size:12px; color:var(--slate);">Confluence space key
-        <input type="text" id="aiSpaceKey" placeholder="e.g. PMO"
+        <input type="text" id="aiSpaceKey" placeholder="e.g. PMO or ~712020abc..."
           style="display:block; margin-top:4px; padding:7px; border:1px solid var(--rule); width:160px; font-family: 'Courier New', monospace;" />
       </label>
       <label style="font-size:12px; color:var(--slate);">Project title
@@ -2017,114 +2017,84 @@ document.getElementById('aiFiles').addEventListener('change', async (e) => {
   ).join('<br>');
 });
 
-// Talks to this app's own backend (server.js), never to api.anthropic.com directly —
-// the backend holds the real API key and decides model/MCP config; the browser only
-// ever sends prompt text. opts.publish routes to /api/publish (Atlassian MCP attached
-// server-side); otherwise /api/draft (plain text, no tools, nothing written anywhere).
-async function callClaude(userText, opts) {
-  opts = opts || {};
-  const endpoint = opts.publish ? '/api/publish' : '/api/draft';
+// Talks to this app's own backend (server.js), never to Anthropic or Confluence directly —
+// the backend holds both the Anthropic key and the Confluence API token.
+async function callServer(endpoint, body) {
   const resp = await fetch(endpoint, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt: userText }),
+    body: JSON.stringify(body),
   });
   const data = await resp.json().catch(() => null);
   if (!resp.ok) {
-    // Anthropic's real error often lives a level deeper than the summary string server.js
-    // puts in `error` — surface all of it so a vague message like "the string did not match
-    // the expected pattern" comes with enough detail to actually find the offending field.
-    const anthropicDetail = data && data.details && data.details.error;
+    // Surface the deepest error detail available (Anthropic's or Confluence's), not just
+    // the summary string, so a vague failure comes with enough to actually diagnose.
+    const nested = data && data.details && (data.details.error || (data.details.errors && data.details.errors[0]));
     const fullMessage = [
       (data && data.error) || ('Server error ' + resp.status),
-      anthropicDetail ? '(' + (anthropicDetail.type || 'detail') + ': ' + (anthropicDetail.message || JSON.stringify(anthropicDetail)) + ')' : '',
+      nested ? '(' + (nested.type || 'detail') + ': ' + (nested.message || nested.title || JSON.stringify(nested)) + ')' : '',
     ].filter(Boolean).join(' ');
     throw new Error(fullMessage);
   }
   return data;
 }
 
-const toolResultsOf = (data) => (data.content || []).filter((b) => b.type === 'mcp_tool_result');
-const textOf = (data) => (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('\n');
-
-// Pulls a Confluence page id + webui link out of a createConfluencePage tool result.
-function parseCreatedPage(block) {
-  try {
-    const raw = block && block.content && block.content[0] && block.content[0].text;
-    if (!raw) return null;
-    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-    if (!parsed || !parsed.id) return null;
-    const webui = parsed._links && parsed._links.webui;
-    const base = (parsed._links && parsed._links.base) || '';
-    return { id: parsed.id, title: parsed.title, url: webui ? base + webui : null };
-  } catch (e) {
-    return null;
-  }
-}
-
 const ACCURACY_RULE = 'Only state facts that literally appear in the source text below \u2014 ' +
   'never infer, guess, or fill in a plausible-sounding name, date, or number. Where the ' +
   'source text doesn\u2019t say, write "not found in source documents" instead.';
 
+const XHTML_RULE = 'Return ONLY well-formed Confluence storage-format XHTML for the page body ' +
+  '(what goes inside the body \u2014 headings, paragraphs, tables, lists). Every tag must be ' +
+  'properly closed (self-close void elements like <br/>), properly nested, and any literal & ' +
+  'or < characters in text must be escaped as &amp; and &lt;. No markdown code fences, no ' +
+  '<html>/<head>/<body> wrapper, no commentary before or after.';
+
 const AI_SECTIONS = [
   {
-    label: 'Project Overview',
-    prompt: (ctx) => 'Create ONE Confluence page using the createConfluencePage tool.\n' +
-      'spaceId: "' + ctx.spaceKey + '" (this is a space key, which the tool also accepts as spaceId)\n' +
-      'title: "' + ctx.projectTitle + '"\n' +
-      'contentFormat: "html"\n' +
-      'Body: a project/deal snapshot table (customer/agency name, contract or order form number, ' +
-      'product scope, key dates, contract term, who signed) and a "Key Stakeholders" table for ' +
-      'both parties, built only from what appears in the source documents below.\n' + ACCURACY_RULE +
+    key: 'overview',
+    titleSuffix: '',
+    draftPrompt: (ctx) => 'Draft a project overview page for "' + ctx.projectTitle + '".\n' +
+      'Include: a project/deal snapshot table (customer/agency name, contract or order form ' +
+      'number, product scope, key dates, contract term, who signed) and a "Key Stakeholders" ' +
+      'table for both parties, built only from what appears in the source documents below.\n' +
+      ACCURACY_RULE + '\n' + XHTML_RULE + '\n\nSOURCE DOCUMENTS:\n' + ctx.sourceText,
+  },
+  {
+    key: 'scope',
+    titleSuffix: ' \u2013 Scope of Services & Deliverables',
+    draftPrompt: (ctx) => 'Draft a page covering every product, module, and service explicitly ' +
+      'named in the source documents (tables/lists), with what is included for each.\n' +
+      ACCURACY_RULE + '\n' + XHTML_RULE + '\n\nSOURCE DOCUMENTS:\n' + ctx.sourceText,
+  },
+  {
+    key: 'timeline',
+    titleSuffix: ' \u2013 Timeline & Phases',
+    draftPrompt: (ctx) => 'Draft a page covering project phases, milestones, durations, and ' +
+      'dates explicitly stated in the source documents. If none exist, say so plainly rather ' +
+      'than inventing a schedule.\n' + ACCURACY_RULE + '\n' + XHTML_RULE +
       '\n\nSOURCE DOCUMENTS:\n' + ctx.sourceText,
   },
   {
-    label: 'Scope of Services & Deliverables',
-    prompt: (ctx) => 'Create a Confluence CHILD page using the createConfluencePage tool.\n' +
-      'spaceId: "' + ctx.spaceKey + '", parentId: "' + ctx.parentId + '"\n' +
-      'title: "' + ctx.projectTitle + ' \u2013 Scope of Services & Deliverables"\n' +
-      'contentFormat: "html"\n' +
-      'Body: every product, module, and service explicitly named in the source documents ' +
-      '(tables/lists), with what is included for each.\n' + ACCURACY_RULE +
-      '\n\nSOURCE DOCUMENTS:\n' + ctx.sourceText,
+    key: 'migration',
+    titleSuffix: ' \u2013 Data Migration',
+    draftPrompt: (ctx) => 'Draft a page covering data migration types, legacy systems, scope, ' +
+      'and any explicit rules/defaults/exclusions stated in the source documents. If there is ' +
+      'no migration content, say so briefly rather than omitting the page.\n' + ACCURACY_RULE +
+      '\n' + XHTML_RULE + '\n\nSOURCE DOCUMENTS:\n' + ctx.sourceText,
   },
   {
-    label: 'Timeline & Phases',
-    prompt: (ctx) => 'Create a Confluence CHILD page using the createConfluencePage tool.\n' +
-      'spaceId: "' + ctx.spaceKey + '", parentId: "' + ctx.parentId + '"\n' +
-      'title: "' + ctx.projectTitle + ' \u2013 Timeline & Phases"\n' +
-      'contentFormat: "html"\n' +
-      'Body: project phases, milestones, durations, and dates explicitly stated in the source ' +
-      'documents. If none exist, say so plainly rather than inventing a schedule.\n' + ACCURACY_RULE +
-      '\n\nSOURCE DOCUMENTS:\n' + ctx.sourceText,
-  },
-  {
-    label: 'Data Migration',
-    prompt: (ctx) => 'Create a Confluence CHILD page using the createConfluencePage tool.\n' +
-      'spaceId: "' + ctx.spaceKey + '", parentId: "' + ctx.parentId + '"\n' +
-      'title: "' + ctx.projectTitle + ' \u2013 Data Migration"\n' +
-      'contentFormat: "html"\n' +
-      'Body: data migration types, legacy systems, scope, and any explicit rules/defaults/' +
-      'exclusions stated in the source documents. If there is no migration content, create the ' +
-      'page saying so briefly rather than omitting it.\n' + ACCURACY_RULE +
-      '\n\nSOURCE DOCUMENTS:\n' + ctx.sourceText,
-  },
-  {
-    label: 'Roles & Responsibilities',
-    prompt: (ctx) => 'Create a Confluence CHILD page using the createConfluencePage tool.\n' +
-      'spaceId: "' + ctx.spaceKey + '", parentId: "' + ctx.parentId + '"\n' +
-      'title: "' + ctx.projectTitle + ' \u2013 Roles & Responsibilities"\n' +
-      'contentFormat: "html"\n' +
-      'Body: a table of named roles and responsibilities for every party, exactly as stated in ' +
-      'the source documents.\n' + ACCURACY_RULE +
-      '\n\nSOURCE DOCUMENTS:\n' + ctx.sourceText,
+    key: 'roles',
+    titleSuffix: ' \u2013 Roles & Responsibilities',
+    draftPrompt: (ctx) => 'Draft a page with a table of named roles and responsibilities for ' +
+      'every party, exactly as stated in the source documents.\n' + ACCURACY_RULE + '\n' +
+      XHTML_RULE + '\n\nSOURCE DOCUMENTS:\n' + ctx.sourceText,
   },
 ];
 
 document.getElementById('aiPublishBtn').addEventListener('click', async () => {
   const statusLine = document.getElementById('aiStatusLine');
   const resultsEl = document.getElementById('aiResults');
-  const spaceKey = document.getElementById('aiSpaceKey').value.trim();
+  const spaceKeyOrId = document.getElementById('aiSpaceKey').value.trim();
   const projectTitle = document.getElementById('aiProjectTitle').value.trim();
   resultsEl.innerHTML = '';
   const log = (html) => { resultsEl.innerHTML += html; };
@@ -2135,86 +2105,56 @@ document.getElementById('aiPublishBtn').addEventListener('click', async () => {
     statusLine.textContent = 'Add at least one readable file first.';
     return;
   }
-  if (!spaceKey || !projectTitle) {
+  if (!spaceKeyOrId || !projectTitle) {
     statusLine.className = 'status-line error';
     statusLine.textContent = 'Enter both a Confluence space key and a project title.';
     return;
   }
-  if (/^\d+$/.test(spaceKey)) {
-    log('<div class="flag"><strong>Heads up:</strong> "' + esc(spaceKey) + '" looks like a numeric ' +
-      'space ID, not a space key. Confluence space keys are normally letters (e.g. <code>PMO</code>) ' +
-      '— trying anyway, but if this lands in the wrong place, check Confluence\u2019s space settings ' +
-      'for the actual key.</div>');
-  }
 
-  // PDF/OCR extraction can leave control characters or unpaired surrogate code points in the
-  // text (confirmed on these Mark43 SOW templates: appendix bullets sometimes come through as
-  // stray Unicode glyphs like \u2209/\u2284/\u2260 due to a font-encoding quirk in the PDF).
-  // Anthropic's API can reject the entire request over this with a generic "string did not
-  // match the expected pattern" error — stripping non-printable/invalid characters up front
-  // avoids sending something malformed in the first place.
   function sanitizeExtractedText(s) {
     return String(s || '')
-      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '') // control chars, keep \n \t
-      .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/g, '') // lone high surrogate
-      .replace(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, ''); // lone low surrogate
+      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+      .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/g, '')
+      .replace(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '');
   }
 
   const sourceText = readable
     .map((f) => '--- ' + f.name + ' ---\n' + sanitizeExtractedText(f.text))
     .join('\n\n')
-    .slice(0, 100000); // keep the request bounded; extremely long dumps get truncated
+    .slice(0, 100000);
 
-  const ctx = { spaceKey, projectTitle, sourceText };
+  const ctx = { spaceKeyOrId, projectTitle, sourceText };
 
   statusLine.className = 'status-line';
   statusLine.textContent = 'Creating overview page\u2026';
 
-  try {
-    const overviewResp = await callClaude(AI_SECTIONS[0].prompt(ctx), { publish: true });
-    const created = toolResultsOf(overviewResp).map(parseCreatedPage).find(Boolean);
-    const modelText = textOf(overviewResp);
-
-    if (!created) {
-      statusLine.className = 'status-line error';
-      statusLine.textContent = 'Claude didn\u2019t create the page \u2014 see details below.';
-      log('<div class="flag"><strong>' + esc(AI_SECTIONS[0].label) + ' \u2014 not created.</strong><br>' +
-        esc(modelText || 'No tool call and no text response. Check ATLASSIAN_OAUTH_TOKEN is set on ' +
-          'the server and that the space key is correct.') + '</div>');
-      return;
-    }
-
-    log('<div class="flag info"><strong>\u2713 ' + esc(AI_SECTIONS[0].label) + '</strong> \u2014 ' +
-      (created.url ? '<a href="' + esc(created.url) + '" target="_blank">' + esc(created.url) + '</a>' : 'created (id ' + esc(created.id) + ')') +
-      '</div>');
-    ctx.parentId = created.id;
-
-    for (let i = 1; i < AI_SECTIONS.length; i++) {
-      const section = AI_SECTIONS[i];
-      statusLine.textContent = 'Creating ' + section.label + '\u2026 (' + i + '/' + (AI_SECTIONS.length - 1) + ')';
-      try {
-        const resp = await callClaude(section.prompt(ctx), { publish: true });
-        const page = toolResultsOf(resp).map(parseCreatedPage).find(Boolean);
-        const text = textOf(resp);
-        if (page) {
-          log('<div class="flag info"><strong>\u2713 ' + esc(section.label) + '</strong> \u2014 ' +
-            (page.url ? '<a href="' + esc(page.url) + '" target="_blank">' + esc(page.url) + '</a>' : 'created (id ' + esc(page.id) + ')') +
-            '</div>');
-        } else {
-          log('<div class="flag"><strong>' + esc(section.label) + ' \u2014 not created.</strong><br>' +
-            esc(text || 'No tool call returned.') + '</div>');
-        }
-      } catch (err) {
-        log('<div class="flag"><strong>' + esc(section.label) + ' \u2014 request failed.</strong><br>' + esc(err.message) + '</div>');
+  let parentId = null;
+  for (let i = 0; i < AI_SECTIONS.length; i++) {
+    const section = AI_SECTIONS[i];
+    const title = projectTitle + section.titleSuffix;
+    statusLine.textContent = 'Creating ' + (section.titleSuffix || 'overview') + '\u2026 (' + (i + 1) + '/' + AI_SECTIONS.length + ')';
+    try {
+      const page = await callServer('/api/publish-page', {
+        title,
+        spaceKeyOrId,
+        parentId: i === 0 ? undefined : parentId,
+        prompt: section.draftPrompt(ctx),
+      });
+      log('<div class="flag info"><strong>\u2713 ' + esc(title) + '</strong> \u2014 ' +
+        (page.url ? '<a href="' + esc(page.url) + '" target="_blank">' + esc(page.url) + '</a>' : 'created (id ' + esc(page.id) + ')') +
+        '</div>');
+      if (i === 0) parentId = page.id;
+    } catch (err) {
+      log('<div class="flag"><strong>' + esc(title) + ' \u2014 not created.</strong><br>' + esc(err.message) + '</div>');
+      if (i === 0) {
+        statusLine.className = 'status-line error';
+        statusLine.textContent = 'Overview page failed \u2014 stopping (child pages need it as a parent).';
+        return;
       }
     }
-
-    statusLine.textContent = 'Done \u2014 review every linked page against the source documents before treating it as final.';
-  } catch (err) {
-    console.error(err);
-    statusLine.className = 'status-line error';
-    statusLine.textContent = 'Claude API request failed: ' + err.message;
   }
+
+  statusLine.textContent = 'Done \u2014 spot-check the created pages against the source documents.';
 });
 
 } catch (setupErr) {
