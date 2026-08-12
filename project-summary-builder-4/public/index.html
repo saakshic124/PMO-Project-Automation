@@ -21,91 +21,176 @@
     font-family: Georgia, 'Times New Roman', serif;
     background: var(--paper);
     color: #262626;
-    max-width: 900px;
+    max-width: 1320px;
     margin: 0 auto;
-    padding: 40px 24px 80px;
-    line-height: 1.5;
+    padding: 48px 40px 100px;
+    line-height: 1.6;
+    font-size: 17px;
   }
-  h1 { font-size: 28px; color: var(--navy-deep); margin: 0 0 4px; }
+  h1 { font-size: 36px; color: var(--navy-deep); margin: 0 0 6px; }
   .subtitle {
     font-family: 'Courier New', monospace;
-    font-size: 12px;
+    font-size: 14px;
     letter-spacing: 0.06em;
     color: var(--slate);
     text-transform: uppercase;
-    margin: 0 0 24px;
+    margin: 0 0 32px;
   }
-  hr { border: none; border-top: 2px solid var(--navy-deep); margin-bottom: 32px; }
+  hr { border: none; border-top: 3px solid var(--navy-deep); margin-bottom: 40px; }
   .card {
     background: #fff;
     border: 1px solid var(--rule);
-    padding: 28px;
+    padding: 40px;
+    border-radius: 4px;
   }
-  .hint { color: var(--slate); font-size: 14px; margin: 0 0 16px; }
+  .card + .card { margin-top: 28px; }
+  .hint { color: var(--slate); font-size: 16px; margin: 0 0 20px; }
   .callout {
-    font-size: 13px;
-    margin: 0 0 16px;
+    font-size: 15px;
+    margin: 0 0 20px;
     background: #eef4ee;
-    border-left: 4px solid var(--ok);
-    padding: 8px 12px;
+    border-left: 5px solid var(--ok);
+    padding: 12px 16px;
   }
   input[type="text"] {
     font-family: 'Courier New', monospace;
-    font-size: 14px;
-    padding: 8px;
+    font-size: 17px;
+    padding: 14px;
     border: 1px solid var(--rule);
     width: 100%;
-    max-width: 460px;
+    max-width: 640px;
     background: var(--paper);
+    border-radius: 3px;
   }
-  label { font-size: 13px; color: var(--slate); display: block; margin: 16px 0 4px; }
-  .actions { margin-top: 20px; display: flex; align-items: center; gap: 14px; }
+  label { font-size: 15px; color: var(--slate); display: block; margin: 22px 0 6px; }
+  .actions { margin-top: 28px; display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
   button {
     font-family: 'Courier New', monospace;
-    font-size: 13px;
+    font-size: 15px;
     letter-spacing: 0.04em;
     text-transform: uppercase;
     background: var(--navy-deep);
     color: #fff;
     border: none;
-    padding: 14px 22px;
+    padding: 18px 30px;
     cursor: pointer;
+    border-radius: 3px;
   }
-  button:hover { opacity: 0.9; }
-  button:disabled { opacity: 0.5; cursor: not-allowed; }
-  .status-line { font-size: 13px; color: var(--slate); }
+  button.secondary {
+    background: #fff;
+    color: var(--navy-deep);
+    border: 2px solid var(--navy-deep);
+    padding: 16px 28px;
+  }
+  button:hover { opacity: 0.88; }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  .status-line { font-size: 15px; color: var(--slate); }
   .status-line.error { color: var(--error); }
-  #fileList { font-size: 12px; color: var(--slate); margin: 10px 0; }
-  #results { margin-top: 20px; font-size: 13px; }
+  #fileList { font-size: 14px; color: var(--slate); margin: 14px 0; line-height: 1.8; }
+  #results { margin-top: 24px; font-size: 15px; }
   .flag {
-    margin: 0 0 10px;
-    padding: 10px 12px;
+    margin: 0 0 12px;
+    padding: 14px 18px;
     background: #fbf1e4;
-    border-left: 4px solid var(--amber);
+    border-left: 5px solid var(--amber);
+    font-size: 15px;
   }
   .flag.info { background: #eef4ee; border-left-color: var(--ok); }
-  .flag strong { display: block; margin-bottom: 2px; }
+  .flag strong { display: block; margin-bottom: 4px; font-size: 16px; }
   a { color: var(--navy-deep); }
+
+  .step-label {
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--amber);
+    margin: 0 0 8px;
+  }
+  .card h2 { font-size: 24px; color: var(--navy-deep); margin: 0 0 18px; }
+
+  /* Rendered draft preview: this is where the drafted Confluence XHTML actually
+     renders as real tables/headings, not just a wall of raw markup. */
+  #previewWrap { display: none; }
+  #preview {
+    border: 1px solid var(--rule);
+    background: var(--paper);
+    padding: 32px;
+    border-radius: 3px;
+    max-height: 900px;
+    overflow-y: auto;
+    font-size: 16px;
+  }
+  #preview h1 { font-size: 26px; }
+  #preview h2 { font-size: 21px; margin-top: 28px; }
+  #preview h3 { font-size: 18px; margin-top: 20px; }
+  #preview table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 16px 0;
+    font-size: 15px;
+  }
+  #preview th, #preview td {
+    border: 1px solid var(--rule);
+    padding: 10px 14px;
+    text-align: left;
+    vertical-align: top;
+  }
+  #preview th {
+    background: #eceadf;
+    font-weight: bold;
+  }
+  #preview tr:nth-child(even) td { background: #fcfbf7; }
+  #preview ul, #preview ol { padding-left: 28px; }
+  #preview p { margin: 10px 0; }
+
+  #rawToggle {
+    font-family: 'Courier New', monospace;
+    font-size: 13px;
+    color: var(--slate);
+    background: none;
+    border: none;
+    text-decoration: underline;
+    cursor: pointer;
+    padding: 0;
+    text-transform: none;
+    letter-spacing: normal;
+  }
+  #rawWrap { display: none; margin-top: 16px; }
+  #rawHtml {
+    width: 100%;
+    min-height: 420px;
+    font-family: 'Courier New', monospace;
+    font-size: 14px;
+    padding: 18px;
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    background: #fff;
+    resize: vertical;
+    line-height: 1.5;
+  }
+  .raw-hint { font-size: 13px; color: var(--slate); margin: 6px 0 0; }
 </style>
 </head>
 <body>
 
 <h1>Project Summary Builder</h1>
-<p class="subtitle">Any files &rarr; one Confluence page, via Claude</p>
+<p class="subtitle">Any files &rarr; a reviewable draft &rarr; one Confluence page</p>
 <hr>
 
-<div class="card">
+<div class="card" id="uploadCard">
+  <p class="step-label">Step 1 &middot; Source files</p>
   <p class="hint">
-    Drop any project files (SOW, order form, dealbook, notes &mdash; anything). Claude reads
-    them and creates <strong>one</strong> Confluence page directly &mdash; one click, no
-    intermediate review step. This is still AI extraction, not guaranteed-accurate OCR &mdash;
-    it can misread a number or a name on messy or unusual documents, so check the created page
-    (linked below once done) against the source documents.
+    Drop any project files (SOW, order form, dealbook, notes &mdash; anything). Claude
+    reads them and drafts a summary you can review below before anything is published.
+    This is AI extraction, not guaranteed-accurate OCR &mdash; it can misread a number or
+    a name on messy or unusual documents, so check the draft against the source before
+    publishing.
   </p>
   <p class="callout">
-    <strong>Self-hosted.</strong> This calls <code>/api/publish-page</code> on this app's own
-    backend, which holds your real Anthropic API key and Confluence credentials server-side
-    &mdash; neither ever reaches this page or your browser.
+    <strong>Self-hosted.</strong> This calls this app's own backend, which holds your
+    real Anthropic API key and Confluence credentials server-side &mdash; neither ever
+    reaches this page or your browser.
   </p>
 
   <input type="file" id="files" multiple accept=".pdf,.xlsx,.xls,.txt" />
@@ -115,8 +200,28 @@
   <input type="text" id="projectTitle" placeholder="e.g. Agawam Project Summary" />
 
   <div class="actions">
-    <button id="publishBtn">Generate &amp; publish to Confluence</button>
-    <span class="status-line" id="statusLine"></span>
+    <button id="draftBtn">Generate draft</button>
+    <span class="status-line" id="draftStatusLine"></span>
+  </div>
+</div>
+
+<div class="card" id="previewWrap">
+  <p class="step-label">Step 2 &middot; Review</p>
+  <h2 id="previewTitle">Draft preview</h2>
+  <div id="preview"></div>
+  <p class="raw-hint">
+    <button id="rawToggle" type="button">Show/edit raw HTML</button> &mdash; make any
+    corrections here before publishing; the preview above won't re-render live, but
+    whatever is in this box is exactly what gets published.
+  </p>
+  <div id="rawWrap">
+    <textarea id="rawHtml" spellcheck="false"></textarea>
+  </div>
+
+  <div class="actions">
+    <button id="publishBtn">Publish to Confluence</button>
+    <button id="regenBtn" class="secondary" type="button">Regenerate draft</button>
+    <span class="status-line" id="publishStatusLine"></span>
   </div>
 
   <div id="results"></div>
@@ -280,56 +385,109 @@ function sanitizeExtractedText(s) {
     .replace(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '');
 }
 
-document.getElementById('publishBtn').addEventListener('click', async () => {
-  const statusLine = document.getElementById('statusLine');
-  const resultsEl = document.getElementById('results');
-  const projectTitle = document.getElementById('projectTitle').value.trim();
-  resultsEl.innerHTML = '';
-
-  const readable = filesState.filter((f) => f.text);
-  if (!readable.length) {
-    statusLine.className = 'status-line error';
-    statusLine.textContent = 'Add at least one readable file first.';
-    return;
-  }
-  if (!projectTitle) {
-    statusLine.className = 'status-line error';
-    statusLine.textContent = 'Enter a page title.';
-    return;
-  }
-
-  const sourceText = readable
-    .map((f) => '--- ' + f.name + ' ---\n' + sanitizeExtractedText(f.text))
-    .join('\n\n')
-    .slice(0, 150000);
-
-  const prompt = 'Draft a single, complete Confluence project summary page titled "' + projectTitle + '".\n' +
+function buildPrompt(projectTitle, sourceText) {
+  return 'Draft a single, complete Confluence project summary page titled "' + projectTitle + '".\n' +
     'Cover, in this order, using headings for each: (1) a project/deal snapshot table ' +
     '(customer/agency name, contract or order form number, product scope, key dates, contract ' +
     'term, who signed); (2) every product, module, and service explicitly named in the source ' +
     'documents; (3) project phases, milestones, and dates if explicitly stated; (4) data ' +
     'migration types/scope if present; (5) named roles and responsibilities for every party.\n' +
     ACCURACY_RULE + '\n' + XHTML_RULE + '\n\nSOURCE DOCUMENTS:\n' + sourceText;
+}
 
-  statusLine.className = 'status-line';
-  statusLine.textContent = 'Generating and publishing\u2026';
+function getSourceTextOrNull() {
+  const readable = filesState.filter((f) => f.text);
+  if (!readable.length) return null;
+  return readable
+    .map((f) => '--- ' + f.name + ' ---\n' + sanitizeExtractedText(f.text))
+    .join('\n\n')
+    .slice(0, 150000);
+}
+
+async function runDraft() {
+  const draftStatusLine = document.getElementById('draftStatusLine');
+  const previewWrap = document.getElementById('previewWrap');
+  const projectTitle = document.getElementById('projectTitle').value.trim();
+
+  const sourceText = getSourceTextOrNull();
+  if (!sourceText) {
+    draftStatusLine.className = 'status-line error';
+    draftStatusLine.textContent = 'Add at least one readable file first.';
+    return;
+  }
+  if (!projectTitle) {
+    draftStatusLine.className = 'status-line error';
+    draftStatusLine.textContent = 'Enter a page title.';
+    return;
+  }
+
+  draftStatusLine.className = 'status-line';
+  draftStatusLine.textContent = 'Generating draft\u2026 this can take a little while for large source sets.';
+  document.getElementById('draftBtn').disabled = true;
+  document.getElementById('results').innerHTML = '';
 
   try {
-    const page = await callServer('/api/publish-page', { title: projectTitle, prompt });
-    statusLine.textContent = 'Done \u2014 spot-check the page against the source documents.';
+    const prompt = buildPrompt(projectTitle, sourceText);
+    const { text } = await callServer('/api/draft', { prompt });
+    document.getElementById('previewTitle').textContent = projectTitle;
+    document.getElementById('preview').innerHTML = text;
+    document.getElementById('rawHtml').value = text;
+    previewWrap.style.display = 'block';
+    previewWrap.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    draftStatusLine.className = 'status-line';
+    draftStatusLine.textContent = 'Draft ready \u2014 review below, then publish when it looks right.';
+  } catch (err) {
+    console.error(err);
+    draftStatusLine.className = 'status-line error';
+    draftStatusLine.textContent = 'Failed: ' + err.message;
+  } finally {
+    document.getElementById('draftBtn').disabled = false;
+  }
+}
+
+document.getElementById('draftBtn').addEventListener('click', runDraft);
+document.getElementById('regenBtn').addEventListener('click', runDraft);
+
+document.getElementById('rawToggle').addEventListener('click', () => {
+  const rawWrap = document.getElementById('rawWrap');
+  rawWrap.style.display = rawWrap.style.display === 'none' || !rawWrap.style.display ? 'block' : 'none';
+});
+
+document.getElementById('publishBtn').addEventListener('click', async () => {
+  const publishStatusLine = document.getElementById('publishStatusLine');
+  const resultsEl = document.getElementById('results');
+  const projectTitle = document.getElementById('projectTitle').value.trim();
+  const bodyHtml = document.getElementById('rawHtml').value;
+  resultsEl.innerHTML = '';
+
+  if (!bodyHtml || !bodyHtml.trim()) {
+    publishStatusLine.className = 'status-line error';
+    publishStatusLine.textContent = 'Nothing to publish \u2014 generate a draft first.';
+    return;
+  }
+
+  publishStatusLine.className = 'status-line';
+  publishStatusLine.textContent = 'Publishing\u2026';
+  document.getElementById('publishBtn').disabled = true;
+
+  try {
+    const page = await callServer('/api/publish-page', { title: projectTitle, bodyHtml });
+    publishStatusLine.textContent = 'Done \u2014 spot-check the page against the source documents.';
     resultsEl.innerHTML = '<div class="flag info"><strong>\u2713 ' + esc(projectTitle) + '</strong> \u2014 ' +
       (page.url ? '<a href="' + esc(page.url) + '" target="_blank">' + esc(page.url) + '</a>' : 'created (id ' + esc(page.id) + ')') +
       '</div>';
   } catch (err) {
     console.error(err);
-    statusLine.className = 'status-line error';
-    statusLine.textContent = 'Failed: ' + err.message;
+    publishStatusLine.className = 'status-line error';
+    publishStatusLine.textContent = 'Failed: ' + err.message;
+  } finally {
+    document.getElementById('publishBtn').disabled = false;
   }
 });
 
 } catch (setupErr) {
   console.error('Setup error:', setupErr);
-  const statusEl = document.getElementById('statusLine');
+  const statusEl = document.getElementById('draftStatusLine');
   if (statusEl) {
     statusEl.textContent = 'Setup error — the page didn\u2019t finish loading correctly: ' + setupErr.message;
     statusEl.className = 'status-line error';
