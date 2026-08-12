@@ -72,9 +72,24 @@ async function confluenceRequest(pathSuffix, options = {}) {
 // accept them. If the input is already numeric, skip the lookup.
 async function resolveSpaceId(spaceKeyOrId) {
   if (/^\d+$/.test(spaceKeyOrId)) return spaceKeyOrId;
-  const data = await confluenceRequest('/spaces?keys=' + encodeURIComponent(spaceKeyOrId) + '&limit=1');
-  const match = data.results && data.results[0];
-  if (!match) throw new Error('No Confluence space found for key "' + spaceKeyOrId + '".');
+  const lookup = async (key) => {
+    const data = await confluenceRequest('/spaces?keys=' + encodeURIComponent(key) + '&limit=1');
+    return data.results && data.results[0];
+  };
+  let match = await lookup(spaceKeyOrId);
+  if (!match && !spaceKeyOrId.startsWith('~')) {
+    // Personal space keys must be prefixed with "~" (e.g. "~712020abc...") \u2014 a bare
+    // account ID pasted without it is a common copy-paste mistake, so retry once with the
+    // tilde added before giving up entirely.
+    match = await lookup('~' + spaceKeyOrId);
+  }
+  if (!match) {
+    throw new Error(
+      'No Confluence space found for key "' + spaceKeyOrId + '" (also tried "~' + spaceKeyOrId +
+      '"). If this is meant to be a personal space, double-check ATLASSIAN_DEFAULT_SPACE ' +
+      'includes the leading "~".'
+    );
+  }
   return match.id;
 }
 
