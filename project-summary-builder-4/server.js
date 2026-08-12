@@ -18,6 +18,10 @@ const MAX_TOKENS = parseInt(process.env.MAX_TOKENS || '4096', 10);
 const ATLASSIAN_SITE = process.env.ATLASSIAN_SITE || ''; // e.g. "mark43.atlassian.net"
 const ATLASSIAN_EMAIL = process.env.ATLASSIAN_EMAIL || '';
 const ATLASSIAN_API_TOKEN = process.env.ATLASSIAN_API_TOKEN || '';
+// Where pages land when the client doesn't specify a space — a key (e.g. "PMO") or a
+// personal space key (e.g. "~712020abc..."). Kept server-side deliberately: the person
+// using the app shouldn't have to know or type a space identifier at all.
+const ATLASSIAN_DEFAULT_SPACE = process.env.ATLASSIAN_DEFAULT_SPACE || '';
 
 if (!ANTHROPIC_API_KEY) {
   console.error(
@@ -140,14 +144,21 @@ app.post('/api/draft', async (req, res) => {
 // ---- Publish: draft the page body with Claude, then create it directly via Confluence's ----
 // ---- own REST API using a static API token. No MCP connector, no OAuth flow. ----
 app.post('/api/publish-page', async (req, res) => {
-  const { title, spaceKeyOrId, parentId, prompt } = req.body || {};
-  if (!title || !spaceKeyOrId || !prompt) {
-    return res.status(400).json({ error: 'Missing "title", "spaceKeyOrId", or "prompt" in request body.' });
+  const { title, prompt, parentId } = req.body || {};
+  const spaceKeyOrId = req.body && req.body.spaceKeyOrId ? req.body.spaceKeyOrId : ATLASSIAN_DEFAULT_SPACE;
+  if (!title || !prompt) {
+    return res.status(400).json({ error: 'Missing "title" or "prompt" in request body.' });
   }
   if (!confluenceConfigured()) {
     return res.status(412).json({
       error: 'ATLASSIAN_SITE / ATLASSIAN_EMAIL / ATLASSIAN_API_TOKEN are not fully configured on ' +
         'this server. See README.md \u2014 "Getting an Atlassian API token" \u2014 before this button will work.',
+    });
+  }
+  if (!spaceKeyOrId) {
+    return res.status(412).json({
+      error: 'No destination space configured. Set ATLASSIAN_DEFAULT_SPACE in the server ' +
+        'environment (a space key like "PMO", or a personal space key like "~712020abc...").',
     });
   }
   try {
