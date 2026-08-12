@@ -429,6 +429,9 @@ async function runDraft() {
   try {
     const prompt = buildPrompt(projectTitle, sourceText);
     const { text } = await callServer('/api/draft', { prompt });
+    if (!text || !text.trim()) {
+      throw new Error('Server returned an empty draft with no error \u2014 this shouldn\u2019t happen; check server logs.');
+    }
     document.getElementById('previewTitle').textContent = projectTitle;
     document.getElementById('preview').innerHTML = text;
     document.getElementById('rawHtml').value = text;
@@ -438,6 +441,7 @@ async function runDraft() {
     draftStatusLine.textContent = 'Draft ready \u2014 review below, then publish when it looks right.';
   } catch (err) {
     console.error(err);
+    previewWrap.style.display = 'none';
     draftStatusLine.className = 'status-line error';
     draftStatusLine.textContent = 'Failed: ' + err.message;
   } finally {
