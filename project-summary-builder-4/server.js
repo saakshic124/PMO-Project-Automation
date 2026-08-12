@@ -149,7 +149,29 @@ async function draftText(prompt) {
     max_tokens: MAX_TOKENS,
     messages: [{ role: 'user', content: fullPrompt }],
   });
-  return stripFences(textOf(data));
+  const text = stripFences(textOf(data));
+  if (!text.trim()) {
+    // Don't fail silently: log everything useful about why Claude's response had
+    // no usable text, so this is diagnosable from Render logs instead of showing
+    // up as a mysteriously empty box in the browser with no error anywhere.
+    console.error(
+      'draftText: Claude returned no usable text.',
+      JSON.stringify({
+        promptChars: fullPrompt.length,
+        stopReason: data.stop_reason,
+        usage: data.usage,
+        contentBlockTypes: (data.content || []).map((b) => b.type),
+      })
+    );
+    const reasonHint =
+      data.stop_reason === 'max_tokens'
+        ? ' The model hit the MAX_TOKENS limit before producing any output \u2014 try raising MAX_TOKENS (currently ' + MAX_TOKENS + ') in your environment variables.'
+        : ' Check the server logs for the raw Anthropic response (stop_reason: ' + data.stop_reason + ').';
+    const err = new Error('Claude returned an empty draft.' + reasonHint);
+    err.status = 502;
+    throw err;
+  }
+  return text;
 }
 
 app.post('/api/draft', async (req, res) => {
