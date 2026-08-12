@@ -1,0 +1,2172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Project Summary Builder</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<style>
+  :root {
+    --ink: #14202b;
+    --paper: #f6f4ee;
+    --panel: #ffffff;
+    --rule: #d8d3c4;
+    --navy: #1c3a52;
+    --navy-deep: #12283a;
+    --slate: #5b6b74;
+    --amber: #b6742b;
+    --ok: #3a6b4f;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: 'Iowan Old Style', 'Palatino Linotype', Georgia, serif;
+    line-height: 1.5;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 48px 28px 80px; }
+  header.masthead {
+    border-bottom: 3px double var(--navy);
+    padding-bottom: 18px;
+    margin-bottom: 32px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+  }
+  header.masthead h1 { font-size: 28px; letter-spacing: 0.02em; margin: 0; color: var(--navy-deep); }
+  header.masthead p {
+    font-family: 'Courier New', monospace; font-size: 11px; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--slate); margin: 4px 0 0;
+  }
+  .step-label {
+    font-family: 'Courier New', monospace; font-size: 11px; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--amber); margin: 0 0 6px;
+  }
+  section.intake { background: var(--panel); border: 1px solid var(--rule); padding: 24px; margin-bottom: 20px; }
+  .doc-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .doc-slot { border: 1px dashed var(--rule); padding: 14px; position: relative; min-height: 150px; display: flex; flex-direction: column; }
+  .doc-slot.filled { border-style: solid; border-color: var(--ok); }
+  .doc-slot h3 { margin: 0 0 4px; font-size: 14px; color: var(--navy-deep); }
+  .doc-slot .hint { font-size: 12px; color: var(--slate); margin: 0 0 10px; }
+  .doc-slot input[type=file] { font-size: 12px; margin-bottom: 8px; }
+  .doc-slot textarea { flex: 1; width: 100%; resize: vertical; font-family: 'Courier New', monospace; font-size: 11px; border: 1px solid var(--rule); padding: 6px; background: #fbfaf6; }
+  .doc-slot .status { font-size: 11px; color: var(--ok); margin-top: 6px; min-height: 14px; }
+  .actions { margin-top: 20px; display: flex; align-items: center; gap: 14px; }
+  button {
+    font-family: 'Courier New', monospace; font-size: 12px; letter-spacing: 0.06em; text-transform: uppercase;
+    padding: 11px 20px; border: 1px solid var(--navy-deep); background: var(--navy); color: #fff; cursor: pointer;
+  }
+  button:hover { background: var(--navy-deep); }
+  button:disabled { background: #b7bfc4; border-color: #b7bfc4; cursor: not-allowed; }
+  button.ghost { background: transparent; color: var(--navy-deep); }
+  button.ghost:hover { background: #eee9dc; }
+  .status-line { font-size: 12px; color: var(--slate); }
+  .status-line.error { color: #a3402c; }
+  #output { display: none; }
+  .page-shell { background: var(--panel); border: 1px solid var(--rule); padding: 36px 40px; }
+  .page-shell h1.doc-title { font-size: 24px; color: var(--navy-deep); margin: 0 0 4px; }
+  .page-shell .toc { font-size: 13px; color: var(--slate); margin: 0 0 28px; }
+  .page-shell h2 { font-size: 16px; color: var(--navy-deep); border-bottom: 1px solid var(--rule); padding-bottom: 6px; margin: 30px 0 12px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin-bottom: 4px; }
+  th, td { border: 1px solid var(--rule); padding: 7px 9px; text-align: left; vertical-align: top; }
+  th { background: #eef1ea; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--navy-deep); }
+  td.center, th.center { text-align: center; }
+  .flag { border-left: 4px solid var(--amber); background: #fbf1e4; padding: 10px 14px; margin-bottom: 10px; font-size: 13px; }
+  .flag.info { border-left-color: var(--ok); background: #eef4ee; }
+  .flag strong { color: var(--navy-deep); }
+  tr.mismatch-row { background: #fbf1e4; }
+  tr.mismatch-row td:first-child { font-weight: 700; }
+  .ocr-btn {
+    margin-top: 8px; font-size: 12px; padding: 6px 10px; border: 1px solid var(--amber);
+    background: #fff; color: var(--amber); border-radius: 4px; cursor: pointer;
+  }
+  .ocr-btn:hover { background: #fdf3e7; }
+  .ocr-btn:disabled { opacity: 0.5; cursor: wait; }
+  .ocr-progress { font-size: 12px; color: var(--slate); margin-top: 4px; }
+  .snapshot dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 20px; font-size: 13px; margin: 0; }
+  .snapshot dt { color: var(--slate); }
+  .snapshot dd { margin: 0; }
+  ul.links { font-size: 13px; padding-left: 18px; }
+  .fill-in { color: var(--amber); font-weight: 700; background: #fbf1e4; padding: 1px 5px; border-radius: 2px; }
+  .copy-bar { margin-top: 24px; display: flex; gap: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <div>
+      <h1>Project Summary Builder</h1>
+      <p>Order Form &middot; SOW &middot; Dealbook &rarr; one reconciled page</p>
+    </div>
+  </header>
+
+  <section class="intake">
+    <p class="step-label">Step 1 — bring the three documents</p>
+    <div class="doc-grid">
+
+      <div class="doc-slot" data-slot="orderForm">
+        <h3>Order Form</h3>
+        <p class="hint">the signed contract (pdf, xlsx, or txt)</p>
+        <input type="file" accept=".pdf,.xlsx,.xls,.txt" />
+        <textarea placeholder="…or paste the text here"></textarea>
+        <p class="status"></p>
+        <button class="ocr-btn" style="display:none">↻ Run OCR on this PDF (slow, ~2–5s/page)</button>
+        <p class="ocr-progress" style="display:none"></p>
+      </div>
+
+      <div class="doc-slot" data-slot="sow">
+        <h3>SOW</h3>
+        <p class="hint">the statement of work (pdf, xlsx, or txt)</p>
+        <input type="file" accept=".pdf,.xlsx,.xls,.txt" />
+        <textarea placeholder="…or paste the text here"></textarea>
+        <p class="status"></p>
+        <button class="ocr-btn" style="display:none">↻ Run OCR on this PDF (slow, ~2–5s/page)</button>
+        <p class="ocr-progress" style="display:none"></p>
+      </div>
+
+      <div class="doc-slot" data-slot="dealbook">
+        <h3>Dealbook</h3>
+        <p class="hint">the internal pricing workbook (xlsx or txt)</p>
+        <input type="file" accept=".pdf,.xlsx,.xls,.txt" />
+        <textarea placeholder="…or paste the text here"></textarea>
+        <p class="status"></p>
+        <button class="ocr-btn" style="display:none">↻ Run OCR on this PDF (slow, ~2–5s/page)</button>
+        <p class="ocr-progress" style="display:none"></p>
+      </div>
+
+    </div>
+
+    <div class="actions">
+      <button id="generateBtn">Build the page</button>
+      <span class="status-line" id="statusLine"></span>
+    </div>
+  </section>
+
+  <section class="intake" id="aiPublishSection">
+    <p class="step-label">Or — any files, straight to Confluence, via your Claude API</p>
+    <p class="hint" style="margin:0 0 14px;">
+      Drop any project files (SOW, order form, dealbook, notes — anything). Claude reads them
+      and creates a multi-page Confluence project space directly using your Atlassian
+      connector — one click, no intermediate review step.
+      <strong>This is still AI extraction, not guaranteed-accurate OCR</strong> — it can
+      misread a number or a name on messy or unusual documents, so check the created pages
+      (linked below once done) against the source documents.
+    </p>
+    <p class="hint" style="margin:0 0 14px; background:#eef4ee; border-left:4px solid var(--ok); padding:8px 12px;">
+      <strong>Self-hosted.</strong> This calls <code>/api/draft</code> and
+      <code>/api/publish</code> on this app's own backend, which holds your real Anthropic API
+      key server-side — the key never reaches this page or your browser. See README.md to run
+      or deploy the server.
+    </p>
+    <input type="file" id="aiFiles" multiple accept=".pdf,.xlsx,.xls,.txt" />
+    <div id="aiFileList" style="font-size:12px;color:var(--slate);margin:10px 0;"></div>
+    <div style="display:flex; gap:18px; margin-top:6px; flex-wrap:wrap;">
+      <label style="font-size:12px; color:var(--slate);">Confluence space key
+        <input type="text" id="aiSpaceKey" placeholder="e.g. PMO or ~712020abc..."
+          style="display:block; margin-top:4px; padding:7px; border:1px solid var(--rule); width:160px; font-family: 'Courier New', monospace;" />
+      </label>
+      <label style="font-size:12px; color:var(--slate);">Project title
+        <input type="text" id="aiProjectTitle" placeholder="e.g. Jersey Village PD – Mark43 Implementation"
+          style="display:block; margin-top:4px; padding:7px; border:1px solid var(--rule); width:380px; font-family: 'Courier New', monospace;" />
+      </label>
+    </div>
+    <div class="actions">
+      <button id="aiPublishBtn">Generate &amp; publish to Confluence</button>
+      <span class="status-line" id="aiStatusLine"></span>
+    </div>
+    <div id="aiResults" style="margin-top:16px; font-size:13px;"></div>
+  </section>
+
+
+  <section id="output">
+    <p class="step-label">Step 2 — review, then copy into Confluence</p>
+    <div class="page-shell" id="pageShell"></div>
+    <div class="copy-bar">
+      <button id="copyBtn">Copy for pasting into Confluence</button>
+      <button class="ghost" id="downloadBtn">Download as .html</button>
+      <span class="status-line" id="copyStatus"></span>
+    </div>
+  </section>
+
+</div>
+
+<script>
+try {
+
+if (typeof pdfjsLib !== 'undefined') {
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+} else {
+  console.warn('pdf.js did not load (blocked network, offline, or ad blocker) — PDF upload will be unavailable, paste text instead.');
+}
+
+const slots = { orderForm: null, sow: null, dealbook: null };
+const slotFiles = { orderForm: null, sow: null, dealbook: null };
+// Tracks PDFs that came back with almost no extractable text — usually a scanned/flattened
+// page image with no text layer, which pdf.js (and this tool) cannot read no matter how the
+// parsing regex is tuned. Surfaced as a discrepancy instead of failing silently.
+const slotLowText = { orderForm: false, sow: false, dealbook: false };
+// True once a slot's text came from the OCR fallback rather than the PDF's own text layer.
+// OCR is never as reliable as real embedded text (misreads digits, mangles table alignment),
+// so this stays visible as a caveat even after a successful OCR pass fixes the low-text problem.
+const slotOcrApplied = { orderForm: false, sow: false, dealbook: false };
+
+document.querySelectorAll('.doc-slot').forEach((slotEl) => {
+  const key = slotEl.dataset.slot;
+  const fileInput = slotEl.querySelector('input[type=file]');
+  const textarea = slotEl.querySelector('textarea');
+  const statusEl = slotEl.querySelector('.status');
+  const ocrBtn = slotEl.querySelector('.ocr-btn');
+  const ocrProgressEl = slotEl.querySelector('.ocr-progress');
+
+  fileInput.addEventListener('change', async () => {
+    const file = fileInput.files[0];
+    if (!file) return;
+    slotFiles[key] = file;
+    slotOcrApplied[key] = false;
+    ocrBtn.style.display = 'none';
+    ocrProgressEl.style.display = 'none';
+    statusEl.textContent = 'reading…';
+    try {
+      const result = await extractText(file);
+      const text = typeof result === 'string' ? result : result.text;
+      textarea.value = text;
+      slots[key] = text;
+      slotLowText[key] = typeof result === 'object' && result.lowText;
+      const warning = slotLowText[key]
+        ? ' — \u26a0 looks like a scanned PDF with little/no text layer'
+        : '';
+      statusEl.textContent = 'loaded ' + file.name + ' (' + text.length.toLocaleString() + ' chars)' + warning;
+      slotEl.classList.add('filled');
+      slotEl.classList.toggle('warn-low-text', slotLowText[key]);
+      // Only offer OCR for an actual scanned PDF — pointless (and slow) to run image OCR
+      // against an xlsx/txt input, or a PDF that already extracted fine.
+      ocrBtn.style.display = (slotLowText[key] && file.name.toLowerCase().endsWith('.pdf')) ? 'inline-block' : 'none';
+    } catch (err) {
+      statusEl.textContent = err.message || 'could not read that file — paste text instead';
+      console.error(err);
+    }
+  });
+
+  ocrBtn.addEventListener('click', async () => {
+    const file = slotFiles[key];
+    if (!file) return;
+    if (typeof Tesseract === 'undefined') {
+      ocrProgressEl.style.display = 'block';
+      ocrProgressEl.textContent = 'OCR library didn\u2019t load (likely blocked by your network) — paste the text in manually instead.';
+      return;
+    }
+    ocrBtn.disabled = true;
+    ocrProgressEl.style.display = 'block';
+    ocrProgressEl.textContent = 'starting OCR\u2026';
+    try {
+      const text = await ocrPdf(file, (page, total) => {
+        ocrProgressEl.textContent = `OCR: page ${page} of ${total}\u2026 (this can take a while \u2014 leave this tab open)`;
+      });
+      textarea.value = text;
+      slots[key] = text;
+      slotOcrApplied[key] = true;
+      slotLowText[key] = false; // OCR replaced the near-empty text-layer result
+      statusEl.textContent = 'OCR complete for ' + file.name + ' (' + text.length.toLocaleString() + ' chars) \u2014 review for recognition errors before trusting it';
+      slotEl.classList.toggle('warn-low-text', false);
+      ocrProgressEl.textContent = 'Done. OCR text can misread digits/tables \u2014 spot-check the important numbers.';
+      ocrBtn.style.display = 'none';
+    } catch (err) {
+      ocrProgressEl.textContent = 'OCR failed: ' + (err.message || err) + ' \u2014 try pasting the text manually instead.';
+      console.error(err);
+    } finally {
+      ocrBtn.disabled = false;
+    }
+  });
+
+  textarea.addEventListener('input', () => {
+    slots[key] = textarea.value;
+    slotEl.classList.toggle('filled', textarea.value.trim().length > 0);
+    if (textarea.value.trim().length > 0) statusEl.textContent = 'pasted text';
+  });
+});
+
+async function extractText(file) {
+  const name = file.name.toLowerCase();
+  if (name.endsWith('.pdf')) {
+    if (typeof pdfjsLib === 'undefined') throw new Error('PDF reader library didn\u2019t load (likely blocked by your network) — paste the text instead.');
+    return extractPdf(file);
+  }
+  if (name.endsWith('.xlsx') || name.endsWith('.xls')) {
+    if (typeof XLSX === 'undefined') throw new Error('Spreadsheet reader library didn\u2019t load (likely blocked by your network) — paste the text instead.');
+    return extractXlsx(file);
+  }
+  return file.text();
+}
+
+// Threshold below which a page is almost certainly a flattened image (scanned signature
+// page, DocuSign export, etc.) rather than real extractable text. A dense text page in
+// these documents typically runs 800+ characters; boilerplate footers alone (Doc ID lines)
+// run under 60. 120 chars/page catches the empty case without flagging genuinely short pages.
+const MIN_CHARS_PER_PAGE = 120;
+
+async function extractPdf(file) {
+  const buf = await file.arrayBuffer();
+  const doc = await pdfjsLib.getDocument({ data: buf }).promise;
+  let out = '';
+  for (let i = 1; i <= doc.numPages; i++) {
+    const page = await doc.getPage(i);
+    const content = await page.getTextContent();
+    // Group text runs into lines by vertical position, then sort each line left-to-right.
+    // The previous approach joined every run on the page with a single space and no line
+    // breaks at all — fine for prose, but it silently destroyed table structure (every row
+    // of the Interfaces / Data Migration tables collapsed into one flat string), which
+    // meant every line-based parser downstream had nothing to split on against a real PDF.
+    // This is the same reconstruction `pdftotext -layout` does, just simplified.
+    const LINE_TOLERANCE = 2; // points; text runs within this Y range count as the same line
+    const lines = [];
+    content.items.forEach((item) => {
+      if (!item.str) return;
+      const y = item.transform[5];
+      const x = item.transform[4];
+      let line = lines.find((l) => Math.abs(l.y - y) <= LINE_TOLERANCE);
+      if (!line) { line = { y, parts: [] }; lines.push(line); }
+      line.parts.push({ x, str: item.str });
+    });
+    lines.sort((a, b) => b.y - a.y); // PDF y increases upward — top of page first
+    out += lines.map((l) => l.parts.sort((a, b) => a.x - b.x).map((p) => p.str).join(' ')).join('\n') + '\n\n';
+  }
+  const avgCharsPerPage = doc.numPages ? out.length / doc.numPages : out.length;
+  return { text: out, lowText: avgCharsPerPage < MIN_CHARS_PER_PAGE, pages: doc.numPages };
+}
+
+// Fallback for scanned/flattened PDFs: pdf.js can only read an embedded text layer, and a
+// scanned page has none. This renders each page to a canvas image instead (same as printing
+// it to a picture) and runs real OCR (Tesseract, compiled to WASM, running entirely in the
+// browser — no server, no upload of the document anywhere) against each page image.
+// Deliberately NOT run automatically on every scanned PDF: OCR is slow (multi-second per
+// page) and CPU-heavy, so it's opt-in via a button once we know text extraction failed.
+async function ocrPdf(file, onProgress) {
+  const buf = await file.arrayBuffer();
+  const doc = await pdfjsLib.getDocument({ data: buf }).promise;
+  const worker = await Tesseract.createWorker('eng');
+  // Tesseract's default page-segmentation mode (fully automatic) was tested against a
+  // real multi-column Order Form table and scrambled rows out of order — codes and
+  // descriptions from different rows got interleaved. PSM 6 ("assume a single uniform
+  // block of text") reads rows in the correct top-to-bottom order for this table style.
+  await worker.setParameters({ tessedit_pageseg_mode: '6' });
+  let out = '';
+  try {
+    for (let i = 1; i <= doc.numPages; i++) {
+      onProgress(i, doc.numPages);
+      const page = await doc.getPage(i);
+      // Higher scale = larger rendered glyphs = meaningfully better OCR accuracy on dense
+      // contract text/tables, at the cost of more render + recognition time per page.
+      const viewport = page.getViewport({ scale: 2.5 });
+      const canvas = document.createElement('canvas');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      const ctx = canvas.getContext('2d');
+      await page.render({ canvasContext: ctx, viewport }).promise;
+      const { data } = await worker.recognize(canvas);
+      out += data.text + '\n\n';
+    }
+  } finally {
+    await worker.terminate();
+  }
+  return out;
+}
+
+async function extractXlsx(file) {
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: 'array' });
+  return wb.SheetNames.map((name) => {
+    const csv = XLSX.utils.sheet_to_csv(wb.Sheets[name]);
+    return '--- Sheet: ' + name + ' ---\n' + csv;
+  }).join('\n\n');
+}
+
+// ---- Offline pattern-matching reconciliation (no API, no network call) ----
+// Tuned to Mark43's standard Order Form / SOW / Dealbook layout. Regex-based,
+// not semantic — it finds known codes, dollar figures, and dates rather than
+// "understanding" the documents, so treat every result as a lead to verify.
+
+// Authoritative product catalog (Mark43 Product SKUs sheet — given directly, not
+// inferred) — used for canonical names AND to explain *why* something might look like
+// a mismatch (e.g. a pre-GA product a rep is tracking as an upsell, not a sold item).
+const SKU_CATALOG = {
+  'RMS 1': { name: 'RMS Report Writing', availability: 'Available', upsell: null },
+  'RMS 2': { name: 'Case Management', availability: 'Available', upsell: null },
+  'RMS 3': { name: 'Property and Evidence', availability: 'Available', upsell: null },
+  'RMS 4': { name: 'RMS Warrants Module', availability: 'Available', upsell: null },
+  'RMS 7': { name: 'RMS Fillable PDFs', availability: 'Available', upsell: null },
+  'RMS 11': { name: 'Booking Module', availability: 'Available', upsell: 'For PDs holding individuals short-term' },
+  'RMS 12': { name: 'RMS Crash', availability: 'PRE-GA \u2014 sales launch in 2026, select markets only (shared Jan \'26 pre-SKO)', upsell: 'Yes' },
+  'RMS 13': { name: 'RMS eCitations', availability: 'Launched for Sales Oct \'25 \u2014 TX/CA begin Q4 2025, other select markets 2026', upsell: 'Yes' },
+  'REPORTAI': { name: 'ReportAI', availability: 'Launched for Sales Oct \'25', upsell: 'Yes' },
+  'BRIEFAI': { name: 'BriefAI', availability: 'Launched for Sales Oct \'25', upsell: 'Yes' },
+  'CAD 1': { name: 'CAD Dispatcher/Call-Taker', availability: 'Available', upsell: null },
+  'CAD 2': { name: 'LE First Responder', availability: 'Available', upsell: null },
+  'CAD 3': { name: 'Fire First Responder', availability: 'Available', upsell: null },
+  'CAD 6': { name: 'Alternate CAD', availability: 'Available', upsell: 'Yes' },
+  'MOB 1 RMS': { name: 'OnScene Mobile Application for RMS', availability: 'Available', upsell: 'Yes' },
+  'MOB 1 CAD': { name: 'OnScene Mobile Application for CAD', availability: 'Available', upsell: 'Yes' },
+  'MOB 3 CAD': { name: 'CarPlay', availability: 'Available', upsell: 'Yes' },
+  'DEX 1': { name: 'CAD Data Exchange', availability: 'Available', upsell: 'Yes' },
+  'UNV 1': { name: 'Universal Search', availability: 'Launched for Sales Oct \'25 \u2014 select market availability begins Dec 2025', upsell: 'Yes' },
+  'INS INF': { name: 'Mark43 Insights Informed', availability: 'Available', upsell: 'Yes' },
+  'INS ADT': { name: 'Insights Additional Tenant Management', availability: 'Available', upsell: 'Yes' },
+  'DLK 1': { name: 'Data Lake \u2013 Base', availability: 'Available', upsell: 'Yes' },
+  'DLK 2': { name: 'Data Lake \u2013 Dedicated', availability: 'Available', upsell: 'Yes' },
+  'DLK 7': { name: 'Data Lake \u2013 Restricted', availability: 'Available', upsell: 'Yes' },
+  'SEC FRT': { name: 'Mark43 Fortified', availability: 'Launched for Sales Oct \'25', upsell: '10% of ARR' },
+  'SEC SCIM': { name: 'SCIM', availability: 'Launched for Sales Oct \'25', upsell: 'Yes' },
+};
+
+const SKU_LABELS = {
+  'RMS 1': 'RMS Reports Writing', 'RMS 2': 'Case Management', 'RMS 3': 'Property and Evidence',
+  'RMS 4': 'Warrants Module', 'RMS 7': 'RMS Fillable PDFs', 'RMS 11': 'Booking Module', 'RMS 12': 'Traffic Crash',
+  'RMS 13': 'eCitations', 'CAD 3': 'Fire First Responder', 'CAD 6': 'Alternate CAD', 'DEX 1': 'CAD Data Exchange',
+  'MOB 1 RMS': 'OnScene (RMS)',
+  'MOB 1 CAD': 'OnScene (CAD)', 'CAD 1': 'CAD Dispatcher/Call-Taker', 'CAD 2': 'CAD First Responder',
+  'INS INF': 'Insights - Informed', 'DLK 1': 'Data Lake - Base', 'SEC FRT': 'Mark43 Fortified',
+  'UNV 1': 'Universal Search', 'USX 1': 'Universal Search', 'USX': 'Universal Search', 'ECT 1': 'eCitations',
+  'PAR 6': 'ConnectCIC', 'INT-MAINT-PLT': 'Interface Maintenance - Platform',
+  'INT-MAINT-ST': 'Interface Maintenance - Standard', 'IMP L1': 'Level 1 Implementation',
+  'IMP ALRT': 'Mark43 Alert', 'IMP SCIM': 'Mark43 SCIM', 'PM 210': 'PM Oversight',
+  'DAIS': 'Data Analytics Implementation', 'IMP ECT': 'eCitations Implementation',
+  'IMP ECT NB': 'eCitations Implementation/Training - New Customer',
+  'IMP RPC': 'Response Plan Configuration', 'IMP GIS': 'GIS Support', 'TRN': 'Standard Training',
+  'DCM EVD': 'Evidence Migration', 'DCM ARP': 'Advanced Report Migration', 'DCM INV': 'Investigations Migration',
+  'IMP INT': 'Interface Development', 'PAR': 'CommSys Implementation',
+  // Confirmed against a real reseller-sold deal (a different Dealbook template than the
+  // direct-sold one above) — new SKU codes not seen before.
+  'ANA 1': 'Insights Informed', 'ANA 2': 'Insights Informed', 'ADT 1': 'Additional Tenant',
+  'RMS 9': 'Use of Force Reporting', 'RMS 14': 'Civil Process', 'RMS 15': 'Permits and Licensing',
+  'IMP-L2': 'Level 2 Implementation', 'IMP L2': 'Level 2 Implementation', 'PM-214': 'Project Oversight',
+  'IMP-ADT': 'Additional Tenant(s)', 'TAM': 'Technical Account Manager',
+  'DCM-1SRC': 'Standard Migration (Single Source)', 'DCM-STND': 'Standard Migration',
+  'DCM-STEVD': 'Evidence Migration', 'DCM-CASES': 'Cases/Investigations Migration',
+  'DCM-ENT': 'Enterprise Migration', 'DCM-CONS': 'Data Migration Consultation', 'DCM-CUST': 'Custom Migration',
+  'PAR 2': 'Third Party Entries Terminal', 'PAR 5': 'State Proxy Emulator', 'PAR 7': 'ConnectCIC State and Regional',
+};
+
+// Two real Order Form layouts exist: "CODE: Description..." (colon in the text itself)
+// and a table layout where the code and description sit in separate cells with nothing
+// between them but whitespace — common in scanned/OCR'd documents, since OCR reproduces
+// the visual table faithfully (no colon to read if there wasn't one to see) but also seen
+// in some agencies' non-scanned Order Forms. Require either the colon, or a strong signal
+// that a description is starting right after (a capital letter or an opening parenthesis) —
+// this catches the no-colon case without matching a code mentioned in passing prose.
+const CODE_REGEX = /\b((?:RMS\s?\d+(?:\s?ST)?|CAD\s?\d+|MOB\s?1(?:\s?RMS|\s?CAD)?|DEX\s?\d*|INS\s?INF|ANA\s?\d*|ADT\s?\d*|DLK\s?\d*|SEC\s?FRT\s?\d*|UNV\s?\d*|USX\s?\d*|ECT\s?\d*|PAR\s?\d*|INT-MAINT-(?:PLT|ST)|IMP\s?(?:L1|L2|ALRT|SCIM|ECT|RPC|GIS|INT|ADT)(?:\s?NB)?|PM\s?210|PM-?214|DAIS|TRN|TAM|DCM\s?(?:EVD|ARP|INV|1SRC|STND|STEVD|CASES|ENT|CONS|CUST)\s?\d*))(?:\s*:|(?=\s+[A-Z(]))/g;
+
+// Codes that mean the same product but got renamed across contract years —
+// fold the newer code into the older one so it shows up once, not twice.
+const CODE_ALIASES = { 'USX 1': 'UNV 1', 'USX': 'UNV 1', 'RMS 13': 'ECT 1' };
+
+// Scoping Assessment's "Product Solution Assessment" block asks about the same products
+// Deal Inputs (AE) and the Order Form already cover, just under a different label
+// ("RMS-Case Management" vs. the SKU "RMS 2") — confirmed as the source of literal
+// duplicate rows in the Products table on a real deal. Mapping each category to its real
+// SKU lets it merge into the *same* row instead of adding a second one under a different
+// name. Source: Mark43's product catalog (RMS-1 = RMS Report Writing, RMS-2 = Case
+// Management, etc.) — kept as its own map since it's a naming correspondence, not a
+// tier/spelling alias like CODE_ALIASES above.
+const SE_CATEGORY_TO_CODE = {
+  'rms-reports': 'RMS 1', 'rms-report writing': 'RMS 1',
+  'rms-case management': 'RMS 2',
+  'rms-evidence': 'RMS 3', 'rms-property and evidence': 'RMS 3',
+  'rms-warrants': 'RMS 4',
+  'rms-fillable pdfs': 'RMS 7',
+  'rms-booking': 'RMS 11',
+  'rms-crash': 'RMS 12',
+  'rms-ecitations': 'RMS 13',
+  'rms-onscene': 'MOB 1 RMS',
+  'cad-dispatcher': 'CAD 1',
+  'cad-first responder': 'CAD 2', 'cad-le first responder': 'CAD 2',
+  'cad-fire first responder': 'CAD 3',
+  'cad-onscene': 'MOB 1 CAD',
+  'cad-alternate cad': 'CAD 6',
+  'platform-dex': 'DEX 1',
+  'platform-universal search': 'UNV 1', 'universal search': 'UNV 1', 'platform-usx': 'UNV 1',
+};
+
+// The Dealbook's internal reference sheet (REF EXT) spells nearly every professional-services
+// SKU with hyphens and often a tier/version suffix — e.g. "IMP-L1", "PM-210", "DCM-ARP-5" — where
+// the customer-facing Order Form uses spaces and no suffix ("IMP L1", "PM 210", "DCM ARP 5").
+// normKey() makes those equivalent for matching. A few codes go further and use a genuinely
+// different abbreviation in the Dealbook than the Order Form (confirmed against real documents,
+// not guessed) — those need an explicit alias since no amount of punctuation-normalizing helps.
+function normKey(s) {
+  return s.toUpperCase().replace(/[-\s]+/g, ' ').trim();
+}
+const NORMALIZED_ALIASES = {
+  'IMP ECITE NB': 'IMP ECT NB',
+  'IMP ECITE EB': 'IMP ECT NB',
+};
+
+// The Order Form often bakes a tier suffix directly into the code ("RMS 1 ST" = RMS 1,
+// Standard tier), while the Dealbook represents the same product as the bare code ("RMS 1")
+// plus a separate tier field. Without reconciling these, the same product shows up as two
+// separate rows. This finds the longest known-code prefix and treats anything left over as
+// a tier/version suffix rather than part of the product identity.
+function canonicalizeCode(rawCode) {
+  const knownCodes = Object.keys(SKU_LABELS).map((k) => ({ key: k, norm: normKey(k) }));
+  let norm = normKey(rawCode);
+  norm = NORMALIZED_ALIASES[norm] || norm;
+  let hit = knownCodes.find((nc) => nc.norm === norm);
+  let tier = '';
+  if (!hit) {
+    const parts = norm.split(' ');
+    for (let cut = parts.length - 1; cut >= 1 && !hit; cut--) {
+      const base = parts.slice(0, cut).join(' ');
+      const found = knownCodes.find((nc) => nc.norm === base);
+      if (found) { hit = found; tier = parts.slice(cut).join(' '); }
+    }
+  }
+  const code = hit ? (CODE_ALIASES[hit.key] || hit.key) : rawCode.toUpperCase().trim();
+  const description = hit ? SKU_LABELS[hit.key] : null;
+  return { code, tier, description };
+}
+
+function normalizeCode(code) {
+  const upper = code.toUpperCase().trim();
+  if (SKU_LABELS[upper]) return SKU_LABELS[upper];
+  // Only a prefix match if it's followed by a space (a real word boundary) — otherwise
+  // "RMS 1" would wrongly match inside "RMS 11", "RMS 12", etc. Longest match wins so a
+  // more specific code (if one exists) is preferred over a shorter, coincidental prefix.
+  const candidates = Object.keys(SKU_LABELS)
+    .filter((k) => upper.startsWith(k + ' '))
+    .sort((a, b) => b.length - a.length);
+  return candidates.length ? SKU_LABELS[candidates[0]] : null;
+}
+
+function findLineItems(text, preferDictionaryDescription) {
+  if (!text) return [];
+  const items = [];
+  const matches = [...text.matchAll(CODE_REGEX)];
+  for (let i = 0; i < matches.length; i++) {
+    const m = matches[i];
+    const rawCode = m[1].replace(/\s+/g, ' ').trim();
+    const { code, tier } = canonicalizeCode(rawCode);
+    const chunkStart = m.index + m[0].length;
+    const chunkEnd = i + 1 < matches.length ? matches[i + 1].index : Math.min(text.length, chunkStart + 220);
+    const chunk = text.slice(chunkStart, chunkEnd).replace(/\s+/g, ' ').trim();
+    const descMatch = chunk.match(/^(.*?)(?=Not to Exceed|\$\d|(?:\d+\s*(?:package|instance|interface|source|bundle)))/i);
+    const rawDesc = (descMatch ? descMatch[1] : chunk).trim().slice(0, 140).replace(/[\s,;:-]+$/, '');
+    // OCR'd tables (confirmed against a real document) can interleave a code into the
+    // middle of a wrapped, two-line description cell — no slicing strategy recovers a
+    // clean description from that, so lean on the known-good dictionary text instead.
+    // Non-OCR extractions keep the richer raw text (it often has real tier/qty detail
+    // the generic dictionary description doesn't), since it's reliably in the right place.
+    const description = preferDictionaryDescription
+      ? (normalizeCode(code) || rawDesc || code)
+      : (rawDesc || normalizeCode(code) || code);
+    const notesMatch = chunk.match(/(Not to Exceed[^.\n]{0,60}|\$\s?[\d,]+\.\d{2}|\d+\s*(?:package|instance|interface|source|bundle)\(?s?\)?)/i);
+    const notes = (notesMatch ? notesMatch[1].trim() : '') + (tier ? ' [tier: ' + tier + ']' : '');
+    items.push({ code, description, notes: notes.trim() });
+  }
+  return items;
+}
+
+function findDate(text, labelPattern) {
+  if (!text) return '';
+  const re = new RegExp(labelPattern + '\\s*[:\\-]?\\s*([A-Za-z]+ \\d{1,2},?\\s*\\d{4}|\\d{1,2}\\/\\d{1,2}\\/\\d{2,4})', 'i');
+  const m = text.match(re);
+  return m ? m[1].trim() : '';
+}
+
+function findFirst(text, re) {
+  if (!text) return '';
+  const m = text.match(re);
+  return m ? m[1].trim() : '';
+}
+
+function escapeRegex(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Finds "Label,Value" or "Label: Value" pairs. Built for the Dealbook's CSV export, where
+// every input field is a literal label/value pair sitting in adjacent cells (e.g. the Deal
+// Inputs tab row ",Agency Name,Agawam Police Department ,,,,"), but works equally well
+// against plain prose with a colon ("Agency Name: Agawam PD"). This is more reliable than
+// scraping the Order Form's prose, because the Dealbook's labels are fixed and hand-entered.
+function findLabeledValue(text, label) {
+  if (!text) return '';
+  const re = new RegExp('(?:^|[,\\n])\\s*' + escapeRegex(label) + '\\s*\\??\\s*[,:]\\s*([^,\\n]+)', 'i');
+  const m = text.match(re);
+  return m ? m[1].trim() : '';
+}
+
+// Finds a True/False flag sitting a cell or two after a label — handles both the
+// "Label,,True" layout (no tier) and "Label,TierName,True" layout (tier cell in between),
+// both confirmed present in Deal Inputs (AE) across real dealbooks. `occurrence` (1-based)
+// picks which match to use when the same label legitimately appears twice in the sheet —
+// e.g. "OnScene" appears once under the RMS Add-On Modules block and again under CAD.
+function findDealInputsBoolean(text, label, occurrence = 1) {
+  if (!text) return null;
+  const re = new RegExp('(?:^|[,\\n])\\s*' + escapeRegex(label) + '\\s*,([^\\n]{0,60})', 'ig');
+  let m; let count = 0; let match = null;
+  while ((m = re.exec(text)) !== null) {
+    count++;
+    if (count === occurrence) { match = m; break; }
+  }
+  if (!match) return null;
+  const boolMatch = match[1].match(/\b(True|False)\b/i);
+  return boolMatch ? boolMatch[1].toLowerCase() === 'true' : null;
+}
+
+function findDealInputsQty(text, label) {
+  if (!text) return null;
+  const re = new RegExp('(?:^|[,\\n])\\s*' + escapeRegex(label) + '\\s*,([^\\n]{0,40})', 'i');
+  const m = text.match(re);
+  if (!m) return null;
+  const numMatch = m[1].match(/(\d+)/);
+  return numMatch ? parseInt(numMatch[1], 10) : null;
+}
+
+// Every real product/module flag we've confirmed in the Deal Inputs (AE) tab, across
+// three agencies (Agawam, Balcones Heights, Jersey Village) — this is the *only* sheet
+// (along with Scoping Assessment (SE) below) this tool reads for scope, deliberately, so
+// this list needs to stay comprehensive rather than growing item-by-item per deal. A code
+// is included where a real Order Form/SKU equivalent is known (so it can cross-reference
+// against the Order Form); where none is known, the label itself becomes the item.
+const DEAL_INPUTS_BOOLEAN_MODULES = [
+  { label: 'Reports', code: 'RMS 1' },
+  { label: 'Case Management', code: 'RMS 2' },
+  { label: 'Property & Evidence', code: 'RMS 3' },
+  { label: 'Fillable PDFs', code: 'RMS 7' },
+  { label: 'Warrants', code: 'RMS 4' },
+  { label: 'Booking', code: 'RMS 11' },
+  { label: 'Crash', code: 'RMS 12' },
+  { label: 'OnScene', code: 'MOB 1 RMS', occurrence: 1 }, // 1st "OnScene" = RMS Add-On Modules block
+  { label: 'Report AI', code: 'Report AI' },
+  { label: 'Brief AI', code: 'Brief AI' },
+  { label: 'Permits and Licensing', code: 'Permits and Licensing' },
+  { label: 'OnScene', code: 'MOB 1 CAD', occurrence: 2 }, // 2nd "OnScene" = CAD block
+  { label: 'Alternate CAD', code: 'CAD 6' },
+  { label: 'Insights', code: 'INS INF' },
+  { label: 'Universal Search', code: 'UNV 1' },
+  { label: 'eCitations', code: 'ECT 1' },
+  { label: 'Fortified', code: 'SEC FRT' },
+  { label: 'CyberClarity', code: 'CyberClarity' },
+];
+const DEAL_INPUTS_QTY_MODULES = [
+  { label: 'Dispatcher/Call-Taker', code: 'CAD 1' },
+  { label: 'LE First Responder', code: 'CAD 2' },
+  { label: 'Fire First Responder', code: 'CAD 3' },
+];
+
+// Reads only the fixed boolean/quantity modules above — a small, verified set, not a
+// generic scan — so every result here is something we've actually confirmed the schema for.
+function findDealInputsModules(dealbookText) {
+  const scoped = scopeToDealSheets(dealbookText);
+  const results = [];
+  DEAL_INPUTS_BOOLEAN_MODULES.forEach(({ label, code, occurrence }) => {
+    const included = findDealInputsBoolean(scoped, label, occurrence || 1);
+    if (included !== null) results.push({ code, included, source: 'Dealbook (Deal Inputs)' });
+  });
+  DEAL_INPUTS_QTY_MODULES.forEach(({ label, code }) => {
+    const qty = findDealInputsQty(scoped, label);
+    if (qty !== null) results.push({ code, included: qty > 0, source: 'Dealbook (Deal Inputs)' });
+  });
+  return results;
+}
+
+// Scoping Assessment (SE) — "Product Solution Assessment" block: a running list of
+// Category / Question / Answer rows (e.g. "RMS-Booking" / "Does the agency have a need
+// for..." / "Yes"). Only the row that starts a new category (a non-blank category cell) is
+// captured — follow-up questions under the same category (blank category cell) are skipped
+// to avoid noise, since the category-level Yes/No is what actually represents a product
+// decision. Reads by *relative* position among non-empty cells (1st = category, 2nd =
+// question, 3rd = answer) rather than a fixed column index — confirmed necessary since
+// whether a sheet's export includes a blank leading column A varies, which shifts every
+// fixed index by one and silently reads the wrong cell.
+function findScopingProductAssessment(dealbookText) {
+  const seText = scopeToSheet(dealbookText, ['Scoping Assessment (SE)', 'Technical Assessment SE']);
+  if (!seText) return [];
+  const lines = seText.split('\n');
+  let inBlock = false;
+  const results = [];
+  for (const line of lines) {
+    const nonEmpty = parseCsvLine(line).filter(Boolean);
+    if (nonEmpty.some((c) => /PRODUCT SOLUTION ASSESSMENT/i.test(c))) { inBlock = true; continue; }
+    if (!inBlock) continue;
+    if (nonEmpty.some((c) => /REPORT WORKFLOWS/i.test(c))) break; // end of this block
+    if (nonEmpty.length < 3) continue; // need at least category, question, answer
+    const [category, question, answer] = nonEmpty;
+    if (/^(question|category)$/i.test(category)) continue; // header row
+    if (category.includes('?')) continue; // a leaked sub-question, not a real category label
+    // A genuine new-category row has a short category label ("RMS-Booking") followed by a
+    // much longer question — a follow-up row (blank category in the source) instead starts
+    // with the question itself, which reliably runs longer than any real category label.
+    if (category.length > 40) continue;
+    const norm = answer.trim().toLowerCase();
+    let included = null;
+    if (/^(yes|m43|mark43)/i.test(norm)) included = true;
+    else if (/^(no|not offering|not included)/i.test(norm)) included = false;
+    if (included !== null) results.push({ label: category.trim(), included, notes: answer.trim(), source: 'Dealbook (Scoping Assessment)' });
+  }
+  return results;
+}
+
+// Scoping Assessment (SE) — "Additional Modules/ Services" table under Implementation
+// Summary (Training, Insights implementation, eCitations implementation, SCIM, Alerts,
+// Response Plan Configuration, GIS Support, Data Consulting, etc.), each with an
+// Included?/Notes pair. Same relative-position reasoning as findScopingProductAssessment.
+function findScopingAdditionalModules(dealbookText) {
+  const seText = scopeToSheet(dealbookText, ['Scoping Assessment (SE)', 'Technical Assessment SE']);
+  if (!seText) return [];
+  const lines = seText.split('\n');
+  let inBlock = false;
+  const results = [];
+  for (const line of lines) {
+    const nonEmpty = parseCsvLine(line).filter(Boolean);
+    if (nonEmpty.some((c) => /^Additional Modules\/? ?Services$/i.test(c))) { inBlock = true; continue; }
+    if (!inBlock) continue;
+    if (nonEmpty.some((c) => /^SUBCONTRACTOR FEES$/i.test(c))) break;
+    if (nonEmpty.length < 2) continue;
+    const [label, status, notes] = nonEmpty;
+    if (/^Included\??$/i.test(label)) continue; // header row
+    // Positive-list match, not a "not no/not-included" negation — a stray "NA" or "TBD"
+    // landing in the status position (when a row's real status cell is blank and Notes
+    // shifts left after non-empty compaction) should read as excluded, not included.
+    const included = /^(yes|included)/i.test(status.trim());
+    results.push({ label: label.trim(), included, notes: (notes || status).trim(), source: 'Dealbook (Scoping Assessment)' });
+  }
+  return results;
+}
+
+// Scoping Assessment (SE) — Data Migration sub-table (Reports/Cases/Evidence/CAD/Custom
+// Migration + a consultation-only row), each with a Yes/No + notes + source count. This is
+// the SE-native equivalent of what the Dealbook's Scope Breakdown SKUs used to provide —
+// reading it here instead keeps Data Migration sourced from AE/SE only, like everything else.
+// The newer Dealbook template's "Product AE" tab is a full SKU catalog — every possible
+// module with its own row, most at quantity 0 (not purchased). Column positions are found
+// once from the sheet's own header markers ("SKU:", "Unit:", "Quantity:") rather than
+// assumed as fixed numbers, since whether a spreadsheet export keeps a blank leading
+// column varies (confirmed as a real bug on the original template's sheets too) — finding
+// the header once and reading everything else relative to it sidesteps that regardless.
+// A row counts as in-scope only when its Quantity (or, for description-only rows with no
+// SKU, like Interface Maintenance tiers, the same Quantity column) is a positive number —
+// this is the check that keeps an unpurchased catalog row from being read as included.
+function findProductAEItems(dealbookText) {
+  const text = scopeToSheet(dealbookText, 'Product AE');
+  if (!text) return [];
+  const lines = text.split('\n');
+  let skuIdx = -1, unitIdx = -1, descIdx = -1, qtyIdx = -1;
+  const items = [];
+  for (const line of lines) {
+    const cells = parseCsvLine(line);
+    const skuHeaderAt = cells.findIndex((c) => /^SKU:?$/i.test((c || '').trim()));
+    if (skuHeaderAt > -1 && skuIdx === -1) {
+      skuIdx = skuHeaderAt;
+      unitIdx = cells.findIndex((c) => /^Unit:?$/i.test((c || '').trim()));
+      qtyIdx = cells.findIndex((c) => /^Quantity:?$/i.test((c || '').trim()));
+      descIdx = unitIdx > -1 ? unitIdx + 1 : skuIdx + 2;
+      continue;
+    }
+    if (skuIdx === -1 || qtyIdx === -1) continue; // haven't found the header yet
+    const rawSku = (cells[skuIdx] || '').trim();
+    const description = (cells[descIdx] || '').trim();
+    if (!rawSku && !description) continue;
+    if (/^(SKU|Unit|Quantity|Optional)s?:?$/i.test(rawSku)) continue; // a later repeated header fragment
+    const qtyRaw = (cells[qtyIdx] || '').toString().trim();
+    const qty = parseFloat(qtyRaw);
+    const included = !isNaN(qty) && qty > 0;
+    const { code } = rawSku ? canonicalizeCode(rawSku) : { code: null };
+    items.push({ code: code || null, description: description || rawSku, included });
+  }
+  return items;
+}
+
+function findScopingDataMigration(dealbookText) {
+  const seText = scopeToSheet(dealbookText, ['Scoping Assessment (SE)', 'Technical Assessment SE']);
+  if (!seText) return [];
+  const KNOWN_TYPES = ['Reports Migration', 'Cases Migration', 'Evidence Migration', 'CAD Migration', 'Custom Migration', 'Data Migration Consultation'];
+  const lines = seText.split('\n');
+  const results = [];
+  lines.forEach((line) => {
+    const cells = parseCsvLine(line);
+    KNOWN_TYPES.forEach((type) => {
+      const idx = cells.findIndex((c) => (c || '').trim() === type);
+      if (idx === -1) return;
+      const status = (cells[idx + 1] || '').trim();
+      const notes = (cells[idx + 2] || '').trim();
+      if (!status && !notes) return;
+      results.push({ type: type.replace(' Migration', ''), status, notes, included: /^yes/i.test(status) });
+    });
+  });
+  return results;
+}
+
+
+
+// Data Migration rows in the SOW are short, single-line, and anchored to a reliable
+// table header ("Data Migration Type / Legacy System / Scope") — verified against real
+// SOWs from 3 different agencies, including one (Balcones Heights) with no migration
+// section at all, which correctly returns nothing rather than a false match. Only
+// matches the "See Appendix" scope wording specifically, since that's what every real
+// example uses — a differently-worded scope column would not be caught by this.
+function findDataMigration(sowText) {
+  if (!sowText) return [];
+  const headerMatch = sowText.match(/Data Migration Type\s+Legacy System\s+Scope/i);
+  if (!headerMatch) return [];
+  const start = headerMatch.index + headerMatch[0].length;
+  const sectionMatch = sowText.slice(start).match(/Section\s+\d+:/);
+  const end = sectionMatch ? start + sectionMatch.index : Math.min(sowText.length, start + 600);
+  const block = sowText.slice(start, end);
+  const lines = block.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const items = [];
+  lines.forEach((line) => {
+    const m = line.match(/^(.+)\s+(\S+(?:\s*\([^)]+\))?)\s+(See Appendix\S*)$/);
+    if (m) items.push({ type: m[1].trim(), legacySystem: m[2].trim(), scope: m[3].trim() });
+  });
+  return items;
+}
+
+// The SOW's Interfaces table (Section 2.6) lists individual named interfaces — "CRIS -
+// Traffic Crash", "Trusted Driver", "RapidSOS". Table rows land on the page as: one line
+// carrying [Name] [Type] [Product (Direction)] [start of Description], then zero or more
+// continuation lines of wrapped Description text, until the next row's Type+Direction
+// anchor appears. That anchor (a known Interface Type token immediately followed by
+// "RMS/CAD (inbound/outbound/bidirectional)") is reliable; the exact line the interface
+// Name starts on is not always — when a Name spans more than one line, the safest bet
+// (confirmed against real examples) is to treat whatever sits after the last sentence-like
+// boundary (a closing parenthesis or period) in the leftover text as the next row's Name,
+// and everything before that boundary as the previous row's trailing Description. When no
+// such boundary exists in the leftover, the whole leftover is the Name (correctly handles
+// the very first row, right after the header).
+function findInterfaces(sowText) {
+  if (!sowText) return [];
+  // Two Interfaces table formats confirmed so far: the original 4-column one (Name / Type
+  // [Platform, Standard, Custom N, 3rd Party] / Product+Direction / Description), and a
+  // simpler 3-column one confirmed on a real deal with no Type column at all (Name /
+  // Product+Direction / Description) — direction itself is sometimes entirely absent there
+  // too (a bare "CAD" with no parenthetical). Try the richer format's header first; if it's
+  // not there, fall back to the simpler one rather than returning nothing.
+  const headerMatchA = sowText.match(/Interface Name\s+Interface Type\s+Product[\s\S]{0,40}?Direction/i);
+  const headerMatchB = !headerMatchA && sowText.match(/Interface Name\s+Product[\s\S]{0,20}?Direction/i);
+  const headerMatch = headerMatchA || headerMatchB;
+  if (!headerMatch) return [];
+  const afterHeader = sowText.slice(headerMatch.index + headerMatch[0].length);
+  // "Section 3:" sometimes extracts with a stray space before the colon ("Section 3 :") —
+  // confirmed on a real SOW; without tolerating that, this boundary silently never matched
+  // and pulled two more pages of unrelated document text into the last interface's description.
+  const endMatch = afterHeader.match(/2\.\d+\s+Data Migration|Section\s+\d+\s*:/i);
+  const block = afterHeader.slice(0, endMatch ? endMatch.index : Math.min(afterHeader.length, 6000));
+
+  // Real PDF text extraction reconstructs table rows imperfectly — line-by-line splitting
+  // turned out to still separate a Type/Direction anchor from the rest of its own row in a
+  // real SOW (a wrapped "Product and\nDirection" header column, or a Description that gets
+  // physically interleaved between "RMS/CAD" and "(bidirectional)"). Flattening the whole
+  // block to one continuous string and finding every Type+Direction anchor across the
+  // *entire* string (not line-by-line) turned out to be far more robust — real interface
+  // Names extract cleanly even when the Type/Direction/Description text around them
+  // doesn't, so a name is reliably right next to its anchor once whitespace is collapsed.
+  let flat = block.replace(/Doc ID:\s*[a-f0-9]+/gi, ' ').replace(/\s+/g, ' ').trim();
+  // A handful of specific words come back with a stray space letter-split (confirmed
+  // against a real extraction: "(i nbound)") — rejoin the ones that would otherwise break
+  // the anchor match.
+  flat = flat.replace(/\bi\s+nbound\b/gi, 'inbound').replace(/\bo\s+utbound\b/gi, 'outbound').replace(/\bbi\s*-?\s*directional\b/gi, 'bidirectional');
+  // Reattach an ordinal split by PDF superscript formatting ("3\nrd Party" / "rd \nLEADRS 3 Party" -> "3rd Party").
+  flat = flat.replace(/\b(\d)\s*(?:rd|st|nd|th)?\s+Party\b/gi, '$1rd Party');
+
+  const anchors = [];
+  let m;
+  if (headerMatchA) {
+    // Up to a few stray words are allowed to sit between the product code and its opening
+    // parenthesis — confirmed against a real row where a Description fragment ("Body
+    // camera") landed there instead of immediately before "(bidirectional)".
+    const ANCHOR_A = /(Platform|Standard|3rd Party API|3rd Party|Custom\s?\d*)\s+((?:RMS|CAD)(?:\s?\/\s?(?:RMS|CAD))?)(?:\s+[A-Za-z]+){0,4}?\s*\(\s*(Inbound|Outbound|Bidirectional)[^)]*\)/gi;
+    while ((m = ANCHOR_A.exec(flat)) !== null) {
+      anchors.push({ start: m.index, end: m.index + m[0].length, type: m[1].replace(/\s+/g, ' ').trim(), direction: (m[2] + ' (' + m[3] + ')').trim() });
+    }
+  } else {
+    // No Type column here, and — worse — a bare "RMS"/"CAD" with no parenthetical direction
+    // at all is a valid Product+Direction cell in this format (confirmed: "RapidSOS CAD
+    // Displays location..."), which is far too ambiguous to anchor on in flattened text —
+    // those same words show up constantly inside Description prose too ("...linking to RMS
+    // Reports"). Real OCR/PDF output for this format reliably starts each row on its own
+    // line, though (confirmed against a real deal), so parse line-by-line here instead of
+    // flattening: a line matching [Name] [RMS/CAD/JMS](+direction) [rest] starts a new row;
+    // anything else is the current row's Description continuing onto the next line.
+    const lines = block.replace(/Doc ID:\s*[a-f0-9]+/gi, '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const ROW_START = /^([A-Z][A-Za-z0-9.\/\s\-()]*?)\s+((?:RMS|CAD|JMS)(?:\s?\/\s?(?:RMS|CAD|JMS))?)\s*(?:\(\s*(Inbound|Outbound|Bidirectional)[^)]*\))?\s*(.*)$/;
+    const rowsB = [];
+    for (const line of lines) {
+      if (/^Interface Name\b/i.test(line)) continue;
+      const rm = line.match(ROW_START);
+      if (rm && rm[1].trim()) {
+        rowsB.push({
+          name: rm[1].trim().replace(/[-–:]\s*$/, ''),
+          type: null,
+          direction: rm[3] ? (rm[2] + ' (' + rm[3] + ')').trim() : rm[2].trim(),
+          description: (rm[4] || '').trim(),
+        });
+      } else if (rowsB.length) {
+        rowsB[rowsB.length - 1].description = (rowsB[rowsB.length - 1].description + ' ' + line).trim();
+      }
+    }
+    return rowsB.filter((r) => r.name);
+  }
+  const rows = [];
+  let cursor = 0;
+  // Finding where the previous row's Description ends and this row's Name begins is the
+  // hard part — a plain "last ')' or '.' in the chunk" breaks on two real cases: a name
+  // that itself has a parenthetical ("E911 (ANI/ALI)" — its own ")" gets mistaken for the
+  // boundary, silently discarding the whole name), and a name with an internal period
+  // ("Axon Evidence.com" — split into "Axon Evidence." + "com"). Preferring the recurring
+  // "(part of ... Interface Bundle)" closing phrase these SOWs actually end most
+  // descriptions with fixes the common case outright; the fallback scan then explicitly
+  // skips a closing paren whose contents look like a short acronym/code (part of a name,
+  // not a description) and a period with no space on either side (a domain-like name, not
+  // a sentence end).
+  const findBoundary = (chunk) => {
+    const bundleMatch = chunk.match(/\(part of[^)]*Interface Bundle\)/i);
+    if (bundleMatch) return bundleMatch.index + bundleMatch[0].length - 1;
+    for (let i = chunk.length - 1; i >= 0; i--) {
+      if (chunk[i] === ')') {
+        const openIdx = chunk.lastIndexOf('(', i);
+        const inside = openIdx > -1 ? chunk.slice(openIdx + 1, i) : '';
+        if (/^[A-Z0-9\/\-]{2,12}$/.test(inside.trim())) continue; // looks like part of a name (e.g. "ANI/ALI"), not a description ending
+        return i;
+      }
+      if (chunk[i] === '.') {
+        const before = chunk[i - 1], after = chunk[i + 1];
+        if (before && after && /[a-zA-Z]/.test(before) && /[a-zA-Z]/.test(after)) continue; // domain-like ("Evidence.com"), not a sentence end
+        return i;
+      }
+    }
+    return -1;
+  };
+  for (const a of anchors) {
+    const between = flat.slice(cursor, a.start);
+    const boundary = findBoundary(between);
+    let name;
+    if (boundary > -1) {
+      if (rows.length) rows[rows.length - 1].description = (rows[rows.length - 1].description + ' ' + between.slice(0, boundary + 1)).trim();
+      name = between.slice(boundary + 1).trim();
+    } else {
+      name = between.trim();
+    }
+    rows.push({ name: name.replace(/[-–:]\s*$/, '').replace(/^(?:rd|st|nd|th)\s+/i, '').replace(/^Description\s+/i, '').trim(), type: a.type, direction: a.direction, description: '' });
+    cursor = a.end;
+  }
+  if (rows.length) {
+    rows[rows.length - 1].description = (rows[rows.length - 1].description + ' ' + flat.slice(cursor)).trim();
+  }
+  return rows.filter((r) => r.name);
+}
+
+// The Dealbook's Scoping Assessment (SE) tab has its own named-Interfaces table, further
+// down from the Product Solution Assessment block — real interface names ("LexisNexis
+// Accurint", "RapidSOS"), each with an explicit "In Scope? Yes/No" column, plus a small
+// CUSTOM sub-table underneath for custom-built interfaces (e.g. "Tyler Tech InCode
+// Warrants"). This is the SE-native list of what's actually being built, in the same
+// vocabulary the SOW uses — a much better match target than the Dealbook's tier-billing
+// SKUs, which bill by tier ("Interface Maintenance - Platform") rather than by name.
+// Two Dealbook templates confirmed so far, with genuinely different interface-table
+// layouts: the original 7-column table (Interface, Platform, Direction, Scope, In Scope?,
+// Description, DLK Required?) sits after a literal "INTERFACES" section label; a newer
+// template (a real reseller-sold deal) has *several* 6-column sub-tables (Interface,
+// Platform, Direction, Vendor/State, In Scope?, Notes) — "Platform Level (Included)",
+// "Standard Level (Add-On)", etc. — each with its own repeated header row and no shared
+// section label at all, and it marks inclusion with the word "Included" rather than "Yes".
+// Rather than hardcode either shape, detect the header row directly (wherever "Interface"
+// and "Platform" cells appear together) and find "In Scope?" by column position from that
+// row, so a new sub-table naturally starts a fresh read the moment its header appears.
+function findScopingInterfaces(dealbookText) {
+  const seText = scopeToSheet(dealbookText, ['Scoping Assessment (SE)', 'Technical Assessment SE', 'Services SE']);
+  if (!seText) return [];
+  const lines = seText.split('\n');
+  const rows = [];
+  let inScopeIdx = -1;
+  for (const line of lines) {
+    const cells = parseCsvLine(line).filter(Boolean);
+    if (cells.length < 2) { inScopeIdx = -1; continue; } // blank row ends the current table
+    const looksLikeHeader = /^(interface|custom - interface name)/i.test(cells[0] || '') && cells.some((c) => /^platform$/i.test(c));
+    if (looksLikeHeader) {
+      inScopeIdx = cells.findIndex((c) => /^in scope\??$/i.test(c));
+      continue;
+    }
+    if (inScopeIdx === -1) continue;
+    const name = (cells[0] || '').trim();
+    const inScopeVal = (cells[inScopeIdx] || '').trim();
+    if (/^(yes|included)/i.test(inScopeVal)) rows.push({ name, inScope: true });
+  }
+  // "Example: <name>" rows are a template artifact confirmed in real Dealbooks — a demo
+  // row left marked "Included" to show what a filled-in row looks like, not a real
+  // purchased interface (the *actual* same-named interface, without the "Example:" prefix,
+  // correctly shows blank a few rows below it in the same real sheet).
+  return rows.filter((r) => r.name
+    && r.name.toLowerCase().indexOf('this is not an interface') === -1
+    && !/^example:/i.test(r.name));
+}
+
+// Interface names get spelled slightly differently between the SOW and the Scoping
+// Assessment (a normalization difference, not a real discrepancy — e.g. "TX DOT CRIS
+// Crash" vs "CRIS -Traffic Crash" both refer to the same interface). Normalize aggressively
+// (strip punctuation, common filler words) and then try exact-match first, falling back to
+// substring containment either direction — a real mismatch stays undetected here only in
+// the safe direction (shown as "not found" rather than a false positive).
+function normalizeInterfaceName(name) {
+  return (name || '')
+    .toLowerCase()
+    .replace(/\(.*?\)/g, '') // drop parenthetical qualifiers like "(ANI/ALI)"
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\b(interface|platform|traffic|crash|the|a|an)\b/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+function interfaceNamesMatch(a, b) {
+  const na = normalizeInterfaceName(a);
+  const nb = normalizeInterfaceName(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  if (na.includes(nb) || nb.includes(na)) return true;
+  // Acronym fallback: one side sometimes shortens a multi-word name to its initials
+  // ("Utility BWC" vs "Utility Body Worn Camera", confirmed on a real deal) — check whether
+  // any word in the shorter name is a short all-letters token whose letters match the
+  // leading letters of a run of consecutive words in the longer name.
+  const acronymMatches = (shortName, longName) => {
+    const shortWords = shortName.split(' ').filter(Boolean);
+    const longWords = longName.split(' ').filter(Boolean);
+    return shortWords.some((w) => {
+      if (w.length < 2 || w.length > 6) return false;
+      for (let start = 0; start <= longWords.length - w.length; start++) {
+        const initials = longWords.slice(start, start + w.length).map((lw) => lw[0]).join('');
+        if (initials === w) return true;
+      }
+      return false;
+    });
+  };
+  if (acronymMatches(na, nb) || acronymMatches(nb, na)) return true;
+  // Last-resort fallback: a shared significant word, checked on lighter tokenization than
+  // na/nb above (which strips words like "crash"/"traffic" as filler — a good call for
+  // telling "CRIS -Traffic Crash" and "TX DOT CRIS Crash" apart from noise, but it also
+  // strips the one word that would've linked "TraCS - Traffic Crash" to "Statewide Crash
+  // System", confirmed on a real deal). "Axon Evidence.com" / "Evidence.com Body Camera"
+  // is the same shape of problem — different word order, "Evidence" as the only anchor.
+  const rawWords = (name) => (name || '').toLowerCase().replace(/\(.*?\)/g, '').replace(/[^a-z0-9]+/g, ' ').split(' ')
+    .filter((w) => w.length >= 4 && !/^(this|that|with|from|interface)$/.test(w));
+  const wordsA = rawWords(a);
+  const wordsB = rawWords(b);
+  return wordsA.some((w) => wordsB.includes(w));
+}
+
+// The Dealbook workbook always includes generic, multi-customer reference/rate-card sheets
+// (REF EXT, Scope Breakdown, Interface Reference, CommSys Reference) alongside the actual
+// deal-specific tabs (Deal Inputs (AE), Scoping Assessment (SE)). Confirmed against a real
+// deal: REF EXT lists SKUs for products that were explicitly NOT purchased (an "Included"
+// column reading False), so scanning it for "is this SKU present" produces false positives —
+// worse than missing an item, since it fabricates scope that was never actually sold.
+// Restrict SKU-code scanning to the deal-specific tabs only.
+// Two known Dealbook template families exist. The original ("Deal Inputs (AE)" /
+// "Scoping Assessment (SE)") is used for direct-sold deals; a newer, structurally
+// different template — confirmed on a real reseller-sold deal — splits the same
+// information across "Snapshot AE" / "Product AE" / "Technical Assessment SE" /
+// "Services SE" / "Partners SE" / "In-Scope Summary" instead. Scoping to *both* sets
+// keeps every existing generic-code scanner (findDealbookLineItems, etc.) working on
+// either template without needing to know which one it's looking at.
+const DEALBOOK_SCOPE_SHEETS = [
+  // 'Product AE'/'Services SE'/'Partners SE' are deliberately NOT included here — each is a
+  // full catalog with a row for every possible SKU/subcontractor item, most not actually
+  // purchased. Including any of them in this generic "does this code appear anywhere in
+  // the text" scanner produces false positives — confirmed on a real deal, where a
+  // "PAR 2: Third Party Entries Terminal, No" row (explicitly NOT in scope) got parsed as
+  // if "PAR" itself were a matched code, with the literal word "No" as its description.
+  // Dedicated, more careful parsers read those sheets instead (see findProductAEItems and
+  // the Partners SE lookup used for PAR-family Dealbook confirmation, both below).
+  'Deal Inputs (AE)', 'Scoping Assessment (SE)',
+  'Snapshot AE', 'Technical Assessment SE',
+];
+function scopeToDealSheets(text) {
+  if (!text) return '';
+  if (!/^--- Sheet: /m.test(text)) return text; // no sheet markers — can't scope safely, use as-is
+  const lines = text.split('\n');
+  let capturing = false;
+  const out = [];
+  for (const line of lines) {
+    const m = line.match(/^--- Sheet: (.+?) ---$/);
+    if (m) { capturing = DEALBOOK_SCOPE_SHEETS.some((n) => m[1].trim().toLowerCase() === n.toLowerCase()); continue; }
+    if (capturing) out.push(line);
+  }
+  return out.join('\n');
+}
+
+// Same idea as scopeToDealSheets, but for exactly one named sheet — used by the
+// Scoping Assessment (SE)-specific parsers below, which need to stay inside named sheet(s)
+// rather than the combined AE+SE text (their section-header matching would otherwise risk
+// crossing into another sheet). Accepts either one sheet name or an array — the newer
+// Dealbook template (confirmed on a real reseller-sold deal) splits the same information
+// that used to live in one "Scoping Assessment (SE)" tab across several differently-named
+// tabs ("Technical Assessment SE", "Services SE"), so callers can pass every plausible
+// name and get all of them concatenated.
+function scopeToSheet(text, sheetNames) {
+  if (!text) return '';
+  if (!/^--- Sheet: /m.test(text)) return text;
+  const names = (Array.isArray(sheetNames) ? sheetNames : [sheetNames]).map((n) => n.toLowerCase());
+  const lines = text.split('\n');
+  let capturing = false;
+  const out = [];
+  for (const line of lines) {
+    const m = line.match(/^--- Sheet: (.+?) ---$/);
+    if (m) { capturing = names.includes(m[1].trim().toLowerCase()); continue; }
+    if (capturing) out.push(line);
+  }
+  return out.join('\n');
+}
+
+
+// Real CSV parsing, not naive line.split(','): the Dealbook's dollar figures come out of
+// SheetJS's sheet_to_csv as quoted fields with the comma left in ("$5,000.00"), and every
+// row in Scope Breakdown has several of these. A plain split(',') breaks those cells apart
+// and shifts every column after them — confirmed against a real row where it silently
+// turned "Interface Maintenance" (Product Family) into a stray "$5" fragment. This handles
+// quoted fields (including an escaped "" inside a quoted field) the way CSV actually works.
+function parseCsvLine(line) {
+  const cells = [];
+  let cur = '';
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (line[i + 1] === '"') { cur += '"'; i++; } else { inQuotes = false; }
+      } else { cur += ch; }
+    } else if (ch === '"') { inQuotes = true; }
+    else if (ch === ',') { cells.push(cur); cur = ''; }
+    else { cur += ch; }
+  }
+  cells.push(cur);
+  return cells.map((c) => c.trim());
+}
+function findDealbookLineItems(text) {
+  if (!text) return [];
+  const scoped = scopeToDealSheets(text);
+  const items = [];
+  const seen = new Set();
+  scoped.split('\n').forEach((line) => {
+    const cells = parseCsvLine(line);
+    for (let i = 0; i < cells.length; i++) {
+      const raw = cells[i];
+      if (!raw) continue;
+      const { code, tier, description: dictDesc } = canonicalizeCode(raw);
+      // canonicalizeCode() falls back to returning the raw token uppercased when nothing
+      // matches — that's fine for merging Order Form codes, but here it would treat every
+      // unrelated CSV cell as a "match". Only proceed when it actually hit a known SKU.
+      if (!dictDesc) continue;
+      if (seen.has(code)) break;
+      seen.add(code);
+      const rawDesc = cells[i + 1] || '';
+      const description = (rawDesc && !/^-?[\d.]+$/.test(rawDesc) ? rawDesc : dictDesc) || code;
+      const swornMatch = line.match(/Total Sworn\s*,\s*(-?[\d.]+)/i);
+      const notes = (swornMatch ? 'Total Sworn: ' + swornMatch[1] : '') + (tier ? ' [tier: ' + tier + ']' : '');
+      items.push({ code, description, notes: notes.trim() });
+      break; // one SKU match per row is enough; avoids re-matching noisy summary rows
+    }
+  });
+  return items;
+}
+
+function keywordPresent(description, code, haystack) {
+  if (!haystack) return false;
+  const lower = haystack.toLowerCase();
+  if (code && lower.includes(code.toLowerCase())) return true;
+  const words = description
+    .split(/\W+/)
+    .filter((w) => w.length >= 4 && !/^(that|with|from|this|standard|include|includes|instance|instances|mark43|informed)$/i.test(w));
+  if (words.length === 0) return false;
+  const hits = words.filter((w) => lower.includes(w.toLowerCase()));
+  // Short descriptions (1-2 real words) need every word present to count \u2014 a single
+  // generic word (like a common English word used elsewhere in the doc) shouldn't be
+  // enough to claim the specific product is mentioned. Longer descriptions use a majority.
+  const threshold = words.length <= 2 ? words.length : Math.ceil(words.length * 0.5);
+  return hits.length >= threshold;
+}
+
+// Interface and Data Migration descriptions are short and formulaic ("CAD Migration",
+// "Advanced Reports Migration", "Interface Maintenance - Custom 1") and share the words
+// "Migration"/"Interface"/"Maintenance" with dozens of unrelated sentences elsewhere in a
+// SOW — those words alone are near-universal, so keywordPresent()'s word-bag approach
+// produces false positives (confirmed against a real SOW: "CAD Migration" read as present
+// only because the standalone word "Migration" is common, while "CAD" — the actual
+// distinguishing word — was too short to survive the length>=4 filter and got dropped).
+// This instead requires the distinguishing word(s) to appear close to the category anchor
+// word, not just anywhere in the document, which is a meaningfully stricter and more
+// accurate bar for exactly the two categories (Interfaces, Data Migration) that get their
+// own discrepancy checks.
+function nearPhrasePresent(description, haystack) {
+  if (!haystack) return false;
+  const ANCHORS = ['migration', 'interface', 'maintenance', 'development'];
+  const anchor = ANCHORS.find((a) => new RegExp(a, 'i').test(description));
+  const distinguishing = description
+    .split(/\W+/)
+    .filter((w) => w.length >= 3 && !ANCHORS.includes(w.toLowerCase())
+      && !/^(the|and|for|with|custom|level|standard|platform|basic|advanced)$/i.test(w));
+  if (!anchor || distinguishing.length === 0) return keywordPresent(description, '', haystack);
+  return distinguishing.some((w) => {
+    // Global flag + iterate every occurrence, not just the first: the first coincidental
+    // hit in a long document can easily be an unrelated false match (confirmed against a
+    // real SOW — "evidence label printers/servers, ... for migration" in a technical
+    // requirements paragraph matched before the real "Evidence Migration" phrase later in
+    // the document, and checking only that first hit silently produced a false negative).
+    const re = new RegExp('(' + escapeRegex(w) + ')([^.\\n]{0,60}?)(' + anchor + ')|(' + anchor + ')([^.\\n]{0,60}?)(' + escapeRegex(w) + ')', 'gi');
+    let m;
+    while ((m = re.exec(haystack)) !== null) {
+      const gap = m[2] !== undefined ? m[2] : m[5];
+      // A comma in the gap usually means these two words are separate items in an
+      // enumerated list ("data migration, interfaces, and CAD-CJIS Systems are completed")
+      // rather than one phrase — confirmed against a real SOW sentence that otherwise
+      // produced a false positive for "CAD Migration".
+      if (!/,/.test(gap || '')) return true;
+    }
+    return false;
+  });
+}
+
+// Same normalization as interfaceNamesMatch, but with a minimum-length guard before
+// trusting a substring match — confirmed necessary here: "RMS Platform" normalizes down
+// to just "rms" (interfaceNamesMatch strips "platform" as filler, which makes sense for
+// interface Type/Name disambiguation but is too aggressive reused here), and "rms" as a
+// bare substring silently swallowed the unrelated "RMS-Gaps" into the wrong row.
+function productLabelsMatch(a, b) {
+  const na = normalizeInterfaceName(a);
+  const nb = normalizeInterfaceName(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  const shorter = na.length <= nb.length ? na : nb;
+  if (shorter.length < 8) return false;
+  return na.includes(nb) || nb.includes(na);
+}
+
+function buildSummary(orderFormText, sowText, dealbookText) {
+  const ofItems = findLineItems(orderFormText, slotOcrApplied.orderForm);
+  // Every product/service claim below is sourced only from Deal Inputs (AE) and Scoping
+  // Assessment (SE) — the two tabs that stay in the same fixed layout on every deal — and
+  // deliberately never from Scope Breakdown, REF EXT, or any other tab, which vary enough
+  // between projects that scanning them produced wrong results on a real deal.
+  const dbItems = findDealbookLineItems(dealbookText);
+
+  // Order Form and Dealbook are two independent, hand-maintained records of the same deal —
+  // they can disagree (stale Dealbook, a reseller-modified Order Form, a typo). Merging them
+  // into one blended row would hide exactly the kind of mismatch this tool exists to catch.
+  // So: keep each source's claim separate, and only ever combine them into a flagged
+  // "mismatch" entry when they actively disagree — never silently pick a winner.
+  const dealInputsModules = findDealInputsModules(dealbookText);
+  // Newer Dealbook template's quantity-aware catalog (see findProductAEItems) — merged in
+  // alongside the original template's boolean flags so either template's Dealbook produces
+  // the same shape of claim ({ code, included }) for the rest of this function to use.
+  const productAEModules = findProductAEItems(dealbookText).filter((it) => it.code);
+  const ofByCode = {};
+  // Multiple genuinely different line items can share the same generic code — confirmed on
+  // a real Order Form where five distinct "PAR: <description>" rows (CommSys
+  // Implementation, Digitech JMS Implementation, Travel Expenses, Data Conversion,
+  // Training Estimate) all resolved to the bare code "PAR" and silently overwrote each
+  // other, discarding "PAR: Digitech Data Conversion" — real data-migration/conversion
+  // work — entirely. Two passes: first group every occurrence of a code by a short
+  // description prefix (not the full text — the same recurring line repeats once per
+  // contract year with different trailing garbage bled in from chunk extraction, so a
+  // full-text compare would wrongly split one item into several). Only once we know
+  // whether a code actually covers one thing or several do we decide whether the bare code
+  // is unambiguous enough to use directly — if several different things share it, none of
+  // them get the bare code (which would default to the dictionary's generic label for
+  // whichever the *first* alphabetically-processed one happened to be, not a real answer
+  // for any of them); each gets its own disambiguated key instead.
+  const codeGroups = new Map(); // base code -> Map(shortDesc -> representative item)
+  ofItems.forEach((it) => {
+    const base = it.code;
+    // 20, not 24 — confirmed on a real deal that 24 was long enough to straddle exactly
+    // where "Fire First Responder" (20 characters, unrelated to any PAR-style disambiguation)
+    // ends and a longer variant ("Fire First Responder responder(s)") continues, splitting
+    // one legitimate item into two near-duplicate rows. 20 still keeps every real PAR
+    // sub-item distinct (they diverge within their first couple of words) while no longer
+    // splitting same-item descriptions that happen to share a 20-character common prefix.
+    // 15, not 20 — confirmed on a real deal that 20 was still long enough to split one
+    // product into two: "Mark43 Fortified 4" vs "Mark43 Fortified 4 - Extra Small" (a tier
+    // qualifier appended in one contract year's row only) differ right at that boundary.
+    // 15 still keeps every real distinct PAR/interface-maintenance sub-item apart (they
+    // diverge within their first word or two), while no longer splitting the same item's
+    // own size/tier qualifier variants into separate rows.
+    const shortDesc = (it.description || '').slice(0, 15).trim().toLowerCase();
+    if (!codeGroups.has(base)) codeGroups.set(base, new Map());
+    codeGroups.get(base).set(shortDesc, it); // last occurrence of a given shortDesc wins — fine, they're equivalent
+  });
+  codeGroups.forEach((variants, base) => {
+    const entries = [...variants.values()];
+    if (entries.length === 1) {
+      ofByCode[base] = { ...entries[0], code: base };
+    } else {
+      entries.forEach((it) => {
+        const key = base + ' \u2014 ' + it.description.slice(0, 40);
+        ofByCode[key] = { ...it, code: key };
+      });
+    }
+  });
+  const dealInputsByCode = {};
+  dealInputsModules.forEach((it) => { dealInputsByCode[it.code] = it; });
+  productAEModules.forEach((it) => { dealInputsByCode[it.code] = { included: it.included, description: it.description }; });
+
+  // A code only belongs in the products table if *something* actually claims it's in
+  // scope. dealInputsByCode includes both true and false readings (false is meaningful —
+  // it's how we detect the Order Form/Dealbook disagreeing) but a code that's false
+  // everywhere and absent from the Order Form isn't "in scope, needs review" — it's just
+  // correctly not purchased, and showing it as a blank/guessed row would be noise.
+  const dealInputsIncludedCodes = Object.keys(dealInputsByCode).filter((c) => dealInputsByCode[c].included);
+  const allCodes = new Set([...Object.keys(ofByCode), ...dealInputsIncludedCodes, ...dbItems.map((it) => it.code)]);
+  const orderFormReadable = !slotLowText.orderForm && (orderFormText || '').trim().length >= 400;
+  // Some deals (confirmed on a real reseller-sold deal) genuinely have no SOW at all — no
+  // Mark43-authored Statement of Work exists for that deal structure. In that case, every
+  // single product would otherwise flag "not found in SOW", which isn't a real
+  // discrepancy — it's just a document that was never going to exist. Suppress those
+  // checks entirely rather than bury the real Order Form/Dealbook mismatches in noise.
+  const sowProvided = !slotLowText.sow && (sowText || '').trim().length >= 200;
+
+  // Some concepts get a different name depending which document you're reading — confirmed
+  // by the account team: the Dealbook/Order Form's "Level 1" implementation package is the
+  // same thing the SOW describes as "Standard" RMS/CAD implementation. keywordPresent()
+  // treats "standard" as a generic stopword and filters it out (reasonable in general,
+  // since it's a near-universal qualifier in these documents) — which defeats a synonym
+  // added to the matched description. This code needs a direct, unfiltered check instead.
+  // Some codes get called something else entirely depending which document you're
+  // reading, in a way keywordPresent's word-matching can't bridge (either because the
+  // word is filtered as a generic stopword, like "standard", or because it's a different
+  // abbreviation altogether, like "USx" for Universal Search). A direct, unfiltered
+  // substring check per code sidesteps both problems.
+  const RAW_TEXT_OVERRIDES = {
+    'IMP L1': /\bstandard\b/i,
+    'UNV 1': /\busx\b/i,
+  };
+  const rawTextMatch = (code, text) => !!(RAW_TEXT_OVERRIDES[code] && RAW_TEXT_OVERRIDES[code].test(text || ''));
+
+  const codeProducts = [...allCodes].map((code) => {
+    const ofItem = ofByCode[code];
+    const dealInputsClaim = dealInputsByCode[code]; // { included: true/false } or undefined = not a mapped module
+    const dbItem = dbItems.find((it) => it.code === code);
+    // Prefer the curated SKU dictionary over raw extracted text — the dictionary is
+    // hand-maintained and reliable, whereas text pulled straight from the Order Form/
+    // Dealbook can come out truncated or run together with an adjacent cell (confirmed on
+    // real deals — "RMS Reports Writing - STANDARD (" cut mid-sentence, or a completely
+    // unrelated line's tail merged in). Only fall back to the raw text for a code we
+    // haven't documented yet, since an approximate label beats a bare, unreadable SKU code.
+    // Skip the dictionary entirely for a disambiguated synthetic code (e.g. "PAR — Digitech
+    // Data Conversion") — normalizeCode's prefix-matching would otherwise treat "PAR — ..."
+    // as just another "PAR" and return the wrong, generic dictionary description for every
+    // distinct line item that got disambiguated this way.
+    const isDisambiguated = code.includes(' \u2014 ');
+    const description = isDisambiguated
+      ? ((ofItem && ofItem.description) || (dbItem && dbItem.description) || code)
+      : (normalizeCode(code) || (dealInputsClaim && dealInputsClaim.description) || (ofItem && ofItem.description) || (dbItem && dbItem.description) || code);
+
+    const inOrderForm = !!ofItem;
+    // Some Order Form templates (confirmed on a real reseller-sold deal) spell a product
+    // out in plain English with no SKU code at all ("Insights Informed – Small" instead of
+    // "ANA 1: Insights Informed") — the code-based scan above can't find those at all. A
+    // keyword fallback catches the common case: if the description text itself shows up in
+    // the Order Form, treat it as present rather than flagging a false "not sold" mismatch.
+    const inOrderFormByKeyword = !inOrderForm && orderFormReadable && keywordPresent(description, '', orderFormText);
+    const inOrderFormEffective = inOrderForm || inOrderFormByKeyword;
+    // Only compute inDealbook / mismatch for codes we have a *direct* Deal Inputs boolean or
+    // qty reading for — everything else falls back to the weaker keyword-presence check
+    // (which was always approximate and shouldn't be treated as a firm claim).
+    // Scoped to the deal-specific AE/SE-equivalent sheets, not the whole workbook — a
+    // generic reference sheet (confirmed on a real deal: a "REF" tab with a section header
+    // literally reading "DATA CONVERSION/MIGRATION (DCM)") can satisfy a keyword match
+    // despite having nothing to do with this specific deal, which produced a false "yes,
+    // it's in the Dealbook" for a service this deal's Dealbook never actually confirmed.
+    // Widened with "Partners SE" specifically for this check (not the generic scanner
+    // above, which stays narrower) — that sheet is where a PAR-family item's real "In
+    // Scope?" answer actually lives, confirmed against a real deal's "PAR 6: ConnectCIC"
+    // row, but its free-text subcontractor rows are too unstructured to trust generically.
+    const parScopedDealbookText = scopeToSheet(dealbookText, [...DEALBOOK_SCOPE_SHEETS, 'Partners SE']);
+    // A disambiguated item (several distinct things sharing one generic code, like the
+    // "PAR" family) tends to share vocabulary with its siblings — "Digitech" genuinely
+    // appears in the Dealbook for the JMS subscription, which let keywordPresent's
+    // majority-match rule wave through "Digitech Data Conversion" even though the word
+    // "conversion" itself never appears anywhere in the deal-specific sheets. Require every
+    // significant word to match for these specifically, not just most of them.
+    const allWordsPresent = (desc, haystack) => {
+      if (!haystack) return false;
+      const lower = haystack.toLowerCase();
+      const words = desc.split(/\W+/).filter((w) => w.length >= 4 && !/^(that|with|from|this|standard|include|includes|instance|instances|mark43|informed)$/i.test(w));
+      return words.length > 0 && words.every((w) => lower.includes(w.toLowerCase()));
+    };
+    const inDealbook = dealInputsClaim ? dealInputsClaim.included : (dbItem ? true : (isDisambiguated
+      ? allWordsPresent(description, parScopedDealbookText)
+      : (keywordPresent(description, code, parScopedDealbookText) || rawTextMatch(code, parScopedDealbookText))));
+
+    let mismatch = null;
+    let unverifiable = null;
+    if (dealInputsClaim && orderFormReadable) {
+      if (inOrderForm && !dealInputsClaim.included) {
+        mismatch = 'Purchased per the Order Form, but the Dealbook\u2019s Deal Inputs tab marks this as NOT included \u2014 confirm the Dealbook wasn\u2019t left stale after a scope change.';
+      } else if (!inOrderFormEffective && dealInputsClaim.included) {
+        mismatch = 'The Dealbook marks this as included, but no matching line item was found in the Order Form \u2014 confirm whether this was actually sold or the Dealbook is ahead of what was signed.';
+      }
+    } else if (dealInputsClaim && !orderFormReadable) {
+      // Not a disagreement — there's simply nothing to compare the Dealbook against. Keep
+      // this distinct from `mismatch` so it doesn't get reported as a contradiction that
+      // wasn't actually found; see the single rolled-up discrepancy entry below instead.
+      unverifiable = true;
+    }
+
+    return {
+      item: code,
+      description,
+      notes: (ofItem && ofItem.notes) || (dbItem && dbItem.notes) || '',
+      // Same reasoning as the Dealbook check above: a disambiguated item shares vocabulary
+      // with its siblings, so majority-word matching produces false positives (confirmed on
+      // a real deal — "Digitech Data Conversion" was showing as "found in SOW" purely from
+      // "Digitech" + the generic word "Data" clearing the majority bar, with "Conversion"
+      // itself never actually appearing anywhere in the SOW).
+      inSOW: isDisambiguated ? allWordsPresent(description, sowText) : (keywordPresent(description, code, sowText) || rawTextMatch(code, sowText)),
+      inOrderForm: inOrderFormEffective,
+      inDealbook,
+      mismatch,
+      unverifiable,
+    };
+  });
+
+  // Scoping Assessment (SE) products/services — split into two groups: ones whose category
+  // maps to a known SKU (merge into that existing row instead of duplicating it) and ones
+  // with no known SKU equivalent (their own row, same as before).
+  // A few categories are informational scoping flags, not products — "RMS-Gaps" is really
+  // the question "are there any known major RMS product gaps?", which doesn't belong next
+  // to actual purchased modules even though it technically has an "included"-shaped answer.
+  const SE_NON_PRODUCT_CATEGORIES = new Set(['rms-gaps']);
+  const seRaw = [
+    ...findScopingProductAssessment(dealbookText),
+    ...findScopingAdditionalModules(dealbookText),
+  ].filter((it) => it.included && !SE_NON_PRODUCT_CATEGORIES.has(it.label.toLowerCase().replace(/\s*-\s*/g, '-').trim()));
+
+  const codeProductsByCode = new Map(codeProducts.map((p) => [p.item, p]));
+  const seStandalone = [];
+  seRaw.forEach((it) => {
+    // Normalize hyphen spacing before lookup — the real dealbook spells this "RMS -
+    // Reports" (spaces around the hyphen), not "RMS-Reports", which silently missed the
+    // map below and made Reports Writing look like it wasn't captured at all.
+    const normalizedLabel = it.label.toLowerCase().replace(/\s*-\s*/g, '-').trim();
+    const mappedCode = SE_CATEGORY_TO_CODE[normalizedLabel];
+    // Fall back to matching the label against an existing product's own description
+    // (e.g. Scoping Assessment says "Universal Search", Deal Inputs already produced a
+    // "UNV 1: Universal Search" row) whenever the explicit map above doesn't cover this
+    // exact label — reusing the same normalize/acronym matching built for Interfaces,
+    // since it's the same "same thing, different name" problem.
+    const existingByText = mappedCode ? null : codeProducts.find((p) => productLabelsMatch(p.description, it.label));
+    const existing = mappedCode ? codeProductsByCode.get(mappedCode) : existingByText;
+    if (existing) {
+      // Already have this product from Deal Inputs/Order Form/Dealbook line items —
+      // fold the Scoping Assessment's signal in rather than adding a second row for it.
+      existing.inSOW = existing.inSOW || keywordPresent(it.label, '', sowText);
+      existing.inDealbook = true;
+      if (it.notes && !existing.notes.includes(it.notes)) {
+        existing.notes = existing.notes ? existing.notes + ' \u00b7 ' + it.notes : it.notes;
+      }
+      return;
+    }
+    if (mappedCode) {
+      // Known SKU, but nothing else has surfaced it yet — add it under the real code/
+      // description instead of the raw Scoping Assessment label.
+      const newProduct = {
+        item: mappedCode,
+        description: SKU_LABELS[mappedCode] || normalizeCode(mappedCode) || it.label,
+        notes: it.notes || '',
+        inSOW: keywordPresent(SKU_LABELS[mappedCode] || it.label, mappedCode, sowText),
+        inOrderForm: false,
+        inDealbook: true,
+        mismatch: null,
+        unverifiable: false,
+      };
+      codeProductsByCode.set(mappedCode, newProduct);
+      seStandalone.push(newProduct);
+      return;
+    }
+    // No known SKU for this category (e.g. "RMS-Gaps") — keep as its own row, same as before.
+    seStandalone.push({
+      item: it.label,
+      description: it.label,
+      notes: it.notes || '',
+      inSOW: keywordPresent(it.label, '', sowText),
+      inOrderForm: false,
+      inDealbook: true,
+      mismatch: null,
+      unverifiable: false,
+    });
+  });
+
+  const products = codeProducts.concat(seStandalone);
+
+  const discrepancies = [];
+
+  // The whole point of comparing three independent documents: surface every place they
+  // actively disagree, front and center, not buried in a table column that's easy to skim past.
+  products.filter((p) => p.mismatch).forEach((p) => {
+    discrepancies.push({
+      severity: 'warning',
+      title: p.item + ' (' + p.description + '): Order Form / Dealbook disagree',
+      detail: p.mismatch,
+    });
+  });
+  // The check above only fires for codes with a *direct* Deal Inputs boolean/quantity
+  // reading (dealInputsClaim) — a disambiguated item (e.g. a "PAR" sub-item with no
+  // Dealbook-side tracking at all) never gets one, so a real Order-Form-vs-Dealbook gap on
+  // one of those would otherwise show up as a quiet blank checkbox instead of an actual
+  // flagged discrepancy. Confirmed on a real deal: an Order Form line for Digitech data
+  // conversion work with no corresponding Dealbook confirmation anywhere.
+  // Some Order Form line items are professional-services or bundle/maintenance fees that
+  // the Dealbook's AE/SE sheets were never going to track individually — confirmed by the
+  // account team: PM 210 (PM Oversight) is a service line, not a product the Deal Inputs
+  // tab tracks; the Interface Bundle Development item and Interface Maintenance
+  // (Platform/Standard tier) fees are known, standard bundle components whose specifics
+  // live in the Interfaces cross-reference section instead, not the Products table.
+  // Prefix-matched (not exact) since these can appear as disambiguated keys like
+  // "IMP INT — PLT: Mark43 Texas Interface Bundle Devel".
+  // Bare "PAR" (professional-services items like Digitech JMS Implementation, Travel
+  // Expenses, Data Conversion, Training Estimate — everything that isn't the numbered
+  // "PAR 6" ConnectCIC subscription) is a services family, confirmed by the account team
+  // to not be individually tracked in either the SOW's scope language or the Dealbook's
+  // AE/SE sheets — same reasoning as PM 210. The negative lookahead excludes "PAR 6" and
+  // any other numbered PAR product, which are real, distinct, and should still be checked.
+  const EXEMPT_PREFIXES = [/^PM 210\b/, /^IMP INT\b/, /^INT-MAINT-(PLT|ST)\b/, /^PAR(?!\s*\d)(\s|\u2014|$)/];
+  products.filter((p) => p.inOrderForm && !p.inDealbook && !p.mismatch && !EXEMPT_PREFIXES.some((re) => re.test(p.item))).forEach((p) => {
+    discrepancies.push({
+      severity: 'warning',
+      title: p.item + ' (' + p.description + '): in the Order Form, not found in the Dealbook',
+      detail: 'Purchased per the Order Form, but no matching keyword turned up anywhere in the Dealbook\u2019s deal-specific sheets \u2014 confirm this was actually scoped, or that the Dealbook needs to be updated.',
+    });
+  });
+
+  // One rolled-up flag instead of one per SKU — the underlying issue (no readable Order
+  // Form) is the same for every affected row, and repeating it N times just buries the
+  // genuine mismatches above in noise.
+  const unverifiableCount = products.filter((p) => p.unverifiable).length;
+  if (unverifiableCount > 0) {
+    discrepancies.push({
+      severity: 'warning',
+      title: unverifiableCount + ' Dealbook scope item(s) could not be checked against the Order Form',
+      detail: (slotLowText.orderForm ? 'The Order Form looks like a scanned PDF with no extractable text.' : 'No usable Order Form text was provided.') + ' The Dealbook\u2019s own claims are still shown in the table below (see the \u201cIn Dealbook\u201d column) but are unverified against the signed Order Form \u2014 treat them as provisional until a readable Order Form is available.',
+    });
+  }
+
+  ['orderForm', 'sow', 'dealbook'].forEach((key) => {
+    if (slotOcrApplied[key]) {
+      const label = { orderForm: 'Order Form', sow: 'SOW', dealbook: 'Dealbook' }[key];
+      discrepancies.push({
+        severity: 'info',
+        title: label + ' was read via OCR, not the PDF\u2019s own text',
+        detail: 'This document had no usable text layer (scanned/flattened PDF), so its content was recovered with in-browser OCR instead. OCR can misread digits, mangle table alignment, or drop characters \u2014 spot-check anything below that was sourced from this document, especially numbers.',
+      });
+    }
+  });
+  ['orderForm', 'sow', 'dealbook'].forEach((key) => {
+    if (slotLowText[key]) {
+      const label = { orderForm: 'Order Form', sow: 'SOW', dealbook: 'Dealbook' }[key];
+      discrepancies.push({
+        severity: 'warning',
+        title: label + ' looks like a scanned PDF',
+        detail: 'Almost no extractable text came out of this PDF, which usually means it\u2019s a flattened/scanned image (common with DocuSign or reseller-routed exports) rather than a text-based PDF. Every field normally sourced from this document below is unreliable \u2014 re-export a text-based version, or paste the text in manually.',
+      });
+    }
+  });
+  // Text is short even for a genuinely brief document, and no scanned-PDF flag was already
+  // raised above \u2014 covers pasted text that's accidentally incomplete (partial copy/paste).
+  [['orderForm', orderFormText, 'Order Form'], ['sow', sowText, 'SOW']].forEach(([key, text, label]) => {
+    if (!slotLowText[key] && text && text.trim().length > 0 && text.trim().length < 400) {
+      discrepancies.push({
+        severity: 'warning',
+        title: label + ' text looks incomplete',
+        detail: 'Only ' + text.trim().length + ' characters were provided for the ' + label + ' \u2014 confirm the full document was attached or pasted, not just an excerpt.',
+      });
+    }
+  });
+
+  // A handful of purchased line items are annual subscriptions/license fees for
+  // infrastructure that a SOW's prose was never going to name explicitly (confirmed
+  // against a real deal — PAR 6 "ConnectCIC State Only" is a state-connection license,
+  // not scope of work) — flagging these as "not found in SOW" every time is not a real
+  // gap, just permanent noise, the same reasoning as dropping RMS Platform/CAD - Core.
+  // PAR 6 (ConnectCIC) and SEC FRT (Mark43 Fortified) are annual license/security fees —
+  // never going to be named in SOW scope-of-work prose. SCIM/Alerts Implementation are
+  // confirmed by the account team to be covered under the SOW's Interface Development
+  // scope rather than named individually, so a literal keyword miss for them isn't a real gap.
+  const SOW_CHECK_EXEMPT_CODES = new Set(['PAR 6', 'SEC FRT', 'SCIM Implementation', 'Alerts Implementation', 'IMP SCIM', 'IMP ALRT']);
+  // Bare "PAR" services (Digitech Implementation/Travel/Data Conversion/Training, CommSys
+  // Implementation, etc.) — confirmed by the account team as services, not products, same
+  // reasoning as PM 210. Excludes numbered PAR products like "PAR 6", which are real and
+  // should still be checked normally.
+  const isExemptCode = (item) => SOW_CHECK_EXEMPT_CODES.has(item) || /^PAR(?!\s*\d)(\s|\u2014|$)/.test(item);
+
+  products.filter((p) => sowProvided && p.inOrderForm && !p.inSOW && !isExemptCode(p.item)).forEach((p) => {
+    discrepancies.push({
+      severity: 'warning',
+      title: `${p.item} not found in SOW`,
+      detail: `Purchased per the Order Form, but no matching keyword turned up in the SOW text \u2014 confirm it's covered by scope language, even under different wording.`,
+    });
+  });
+  // Generalizes the same check to every Dealbook-sourced product, not just Order-Form-linked
+  // ones — confirmed valuable against a real deal, where a scoped CAD migration turned out
+  // to be missing from the executed SOW with no Order Form involved in catching it at all.
+  products.filter((p) => sowProvided && p.inDealbook && !p.inSOW && !p.inOrderForm && !isExemptCode(p.item)).forEach((p) => {
+    discrepancies.push({
+      severity: 'warning',
+      title: `${p.item}${p.item !== p.description ? ' (' + p.description + ')' : ''}: in the Dealbook, not found in the SOW`,
+      detail: `The Dealbook marks this as included, but no matching keyword turned up in the SOW text \u2014 confirm it's covered by scope language, even under different wording, or that a change order is needed.`,
+    });
+  });
+
+  // Data Migration gets its own section below rather than folding into the main products
+  // table — a migration nobody scoped work for is a real delivery risk. Sourced from
+  // Scoping Assessment (SE)'s own Data Migration sub-table, same AE/SE-only rule as
+  // everything above.
+  const seDataMigration = findScopingDataMigration(dealbookText).filter((m) => m.included);
+  const dataMigrationItems = seDataMigration.map((m) => {
+    const description = m.type + ' Migration';
+    return {
+      item: m.type,
+      description,
+      notes: m.notes || m.status,
+      inSOW: nearPhrasePresent(description, sowText),
+      inOrderForm: false,
+      inDealbook: true,
+    };
+  });
+  // Cases Migration and CAD Migration are confirmed by the account team to be covered
+  // under the SOW's Interface Development scope rather than the Data Migration section
+  // specifically, so a literal keyword miss for them there isn't a real gap.
+  const DATA_MIGRATION_SOW_EXEMPT = new Set(['Cases', 'CAD']);
+  dataMigrationItems.filter((p) => sowProvided && !p.inSOW && !DATA_MIGRATION_SOW_EXEMPT.has(p.item)).forEach((p) => {
+    discrepancies.push({
+      severity: 'warning',
+      title: `${p.item} (${p.description}): migration in the Dealbook, not found in the SOW`,
+      detail: `The Dealbook marks this migration type as in scope, but no matching keyword turned up in the SOW's Data Migration section \u2014 confirm it's actually in scope, or that the SOW needs a change order.`,
+    });
+  });
+
+  // Interfaces — cross-referenced by real interface name across all three documents: the
+  // SOW's own Interfaces table (2.6), the Dealbook's Scoping Assessment INTERFACES table
+  // (In Scope? = Yes), and a keyword check against the Order Form. Matched by name, not by
+  // SKU/tier, since a single Dealbook billing line (e.g. "Interface Maintenance -
+  // Platform") can cover several differently-named interfaces at once and isn't a
+  // meaningful match target — this only ever looks at named interfaces from real per-deal
+  // sources (SOW + Scoping Assessment), never the generic tier-billing SKUs.
+  const sowInterfaces = findInterfaces(sowText);
+  const dealbookInterfaces = findScopingInterfaces(dealbookText);
+  const interfaceGroups = []; // [{ names: [...all spellings seen...], inSOW, inDealbook, inOrderForm }]
+  const findGroup = (name) => interfaceGroups.find((g) => g.names.some((n) => interfaceNamesMatch(n, name)));
+
+  sowInterfaces.forEach((i) => {
+    let g = findGroup(i.name);
+    if (!g) { g = { names: [], inSOW: false, inDealbook: false, inOrderForm: false, sowDetail: null }; interfaceGroups.push(g); }
+    g.names.push(i.name);
+    g.inSOW = true;
+    g.sowDetail = i;
+  });
+  dealbookInterfaces.forEach((i) => {
+    let g = findGroup(i.name);
+    if (!g) { g = { names: [], inSOW: false, inDealbook: false, inOrderForm: false, sowDetail: null }; interfaceGroups.push(g); }
+    g.names.push(i.name);
+    g.inDealbook = true;
+  });
+  const interfaceItems = interfaceGroups.map((g) => {
+    const displayName = g.sowDetail ? g.sowDetail.name : g.names[0];
+    const inOrderForm = orderFormReadable && keywordPresent(displayName, '', orderFormText);
+    return {
+      item: displayName,
+      description: g.sowDetail ? g.sowDetail.description : '',
+      notes: g.sowDetail ? [g.sowDetail.type, g.sowDetail.direction].filter(Boolean).join(' \u00b7 ') : '',
+      inSOW: g.inSOW,
+      inOrderForm,
+      inDealbook: g.inDealbook,
+    };
+  });
+  interfaceItems.filter((i) => sowProvided && i.inDealbook && !i.inSOW).forEach((i) => {
+    discrepancies.push({
+      severity: 'warning',
+      title: `${i.item}: interface scoped in the Dealbook, not found in the SOW`,
+      detail: `The Scoping Assessment marks this interface "In Scope: Yes", but it doesn't appear in the SOW's Interfaces table \u2014 confirm the SOW covers it under a different name, or that it's missing and needs to be added.`,
+    });
+  });
+  interfaceItems.filter((i) => sowProvided && i.inSOW && !i.inDealbook).forEach((i) => {
+    discrepancies.push({
+      severity: 'warning',
+      title: `${i.item}: interface in the SOW, not found in the Scoping Assessment`,
+      detail: `The SOW's Interfaces table includes this interface, but the Dealbook's Scoping Assessment doesn't have a matching "In Scope: Yes" row \u2014 the scoping record may be stale or incomplete relative to the executed SOW.`,
+    });
+  });
+
+  const FILL_IN = (hint) => `[PLEASE FILL IN\u2014${hint}]`;
+
+  const startDate = findDate(orderFormText, 'Start Date') || FILL_IN('not specified in source documents');
+  const endDate = findDate(orderFormText, 'End Date') || FILL_IN('not specified in source documents');
+
+  // Dealbook is the most reliable source for these three — it's a fixed, hand-entered
+  // label/value cell, whereas the Order Form is prose the agency's own reseller may reformat,
+  // and is sometimes an unreadable scanned PDF entirely (see lowText check above). Scoped to
+  // the deal-specific tabs only, for the same reason findDealbookLineItems is scoped.
+  const dealInputsText = scopeToDealSheets(dealbookText);
+  const sworn = findLabeledValue(dealInputsText, 'Sworn Count')
+    || findFirst(orderFormText, /Not to Exceed\s+(\d+)\s+total sworn/i);
+  // Anchored on the "Address:" label itself (the Subscriber's, not Mark43's own — Mark43's
+  // own address at the top of the page has no "Address:" label at all) — a plain citywide
+  // state+zip pattern with no anchor matched Mark43's own "New York, NY 10018" first,
+  // confirmed wrong against a real Order Form whose actual subscriber was in NM.
+  const state = findLabeledValue(dealInputsText, 'What State is the Agency')
+    || findFirst(orderFormText, /Address:\s*[\s\S]*?,\s*([A-Z]{2})\s+\d{5}/);
+  const titleGuessRaw = findLabeledValue(dealInputsText, 'Agency Name')
+    // The Subscriber Name / Start Date cells sit side-by-side in the PDF's table, so a real
+    // extraction interleaves them mid-line rather than emitting the Name cleanly — confirmed
+    // on a real Order Form where the two columns' text ends up genuinely interlocked
+    // character-by-character with no clean separator to split on. Capturing just up to the
+    // first line break is a deliberate, honest fallback: a short-but-correct fragment beats
+    // a longer one contaminated with the other column's text.
+    || findFirst(orderFormText, /Subscriber Name:\s*([^\n]*?)(?=\s*Start Date)/i)
+    || findFirst(sowText, /(?:to|for)\s+([A-Z][A-Za-z .]+?)\s*\(Subscriber\)/)
+    || FILL_IN('agency name not found');
+  const titleGuess = titleGuessRaw.replace(/\s+/g, ' ').trim();
+
+  // A multi-agency shared-tenant deal (confirmed on a real deal, where a single Order
+  // Form/Dealbook actually covers five agencies sharing one implementation) states this
+  // explicitly in the SOW's Tenant Provisioning section rather than anywhere in the Order
+  // Form or Dealbook — easy to miss entirely if nobody reads that specific paragraph.
+  // Optional: only shown when the SOW actually says this, not a FILL_IN placeholder,
+  // since most deals are single-agency and this would just be noise for them.
+  const additionalAgencies = findFirst(sowText, /additional agencies include\s+([\s\S]*?)\.(?:\s|$)/i);
+
+  const signatureBlock = (orderFormText || '').slice(-900);
+  // Anchoring on "Name:" immediately preceding a value breaks on a real two-column
+  // signature block, where Y-position-based PDF extraction put each side's typed name on
+  // its own disconnected line, floating away from its own "Name:" label entirely (confirmed:
+  // "Maria Hernandez\nName:   Name:\nChristopher D. Merwin\nCity Administrator\nTitle:...").
+  // Scanning for name-shaped standalone lines instead — 2-4 capitalized words, no colon —
+  // finds the real names regardless of where they landed. Job-title-shaped lines look the
+  // same way (also 2-3 capitalized words), so common title keywords are excluded by name;
+  // this list won't cover every possible title, but it's a meaningful improvement over
+  // matching the literal word "Name" as if it were a person (a real bug on a genuinely
+  // unsigned Order Form, where the label itself was the only thing there to match).
+  const NAME_SHAPE = /^[A-Z][a-zA-Z]*\.?(?:\s+[A-Z][a-zA-Z]*\.?){1,3}$/;
+  const TITLE_WORDS = /\b(Administrator|Officer|Chief|Manager|Director|Chairman|President|Sheriff|Captain|Lieutenant|Mayor|Supervisor|Coordinator|Financial|Executive)\b/i;
+  const signedByMatches = signatureBlock.split(/\n/).map((l) => l.trim()).filter(Boolean)
+    .filter((l) => NAME_SHAPE.test(l) && !TITLE_WORDS.test(l) && !/^(Mark43|Subscriber|Name|Title|Signature|Date|Doc)\b/i.test(l));
+  const signedBy = signedByMatches.length ? [...new Set(signedByMatches)].join(', ') : FILL_IN('signature block not found, check signature page manually');
+
+  return {
+    title: titleGuess.trim(),
+    dealSnapshot: {
+      'Start date': startDate,
+      'End date': endDate,
+      'State': state || FILL_IN('not found, check manually'),
+      'Sworn': sworn || FILL_IN('not found, check manually'),
+      ...(additionalAgencies ? { 'Additional agencies in scope': additionalAgencies.replace(/\s+/g, ' ').trim().replace(/^the\s+/i, '') } : {}),
+      'Signed by': signedBy,
+    },
+    products,
+    discrepancies,
+    dataMigration: dataMigrationItems,
+    sowDataMigration: findDataMigration(sowText),
+    interfaces: interfaceItems,
+    timeline: [
+      { label: 'Contract start', value: startDate },
+      { label: 'Contract end', value: endDate },
+      { label: 'Target app setup dates', value: FILL_IN('not specified in source documents') },
+      { label: 'Target training dates', value: FILL_IN('not specified in source documents') },
+      { label: 'Target launch date', value: FILL_IN('not specified in source documents') },
+    ],
+    sources: [
+      orderFormText ? 'Order Form (attached)' : null,
+      sowText ? 'Statement of Work (attached)' : null,
+      dealbookText ? 'Dealbook (attached)' : null,
+    ].filter(Boolean),
+  };
+}
+
+document.getElementById('generateBtn').addEventListener('click', () => {
+  const statusLine = document.getElementById('statusLine');
+
+  if (!slots.orderForm && !slots.sow && !slots.dealbook) {
+    statusLine.textContent = 'Add at least one document first.';
+    statusLine.className = 'status-line error';
+    return;
+  }
+
+  statusLine.className = 'status-line';
+  statusLine.textContent = 'Parsing…';
+
+  try {
+    const summary = buildSummary(slots.orderForm, slots.sow, slots.dealbook);
+    render(summary);
+    statusLine.textContent = 'Done \u2014 double-check the flagged items below.';
+  } catch (err) {
+    console.error(err);
+    statusLine.textContent = 'Something went wrong \u2014 see console for details.';
+    statusLine.className = 'status-line error';
+  }
+});
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+}
+const check = (b) => (b ? '&#10003;' : '');
+
+// Confluence's paste sanitizer strips <style> blocks and CSS classes entirely — the only
+// styling that has any chance of surviving a paste is an inline style="..." attribute on
+// each element itself. These mirror the page's own on-screen CSS (colors, borders, spacing)
+// but as literal hex values, since CSS custom properties (var(--rule) etc.) don't travel
+// either. Every table/heading/flag below is built with these instead of a class name.
+const FONT = "font-family: Georgia, 'Palatino Linotype', serif;";
+const ST = {
+  h1: FONT + ' font-size:24px; color:#12283a; margin:0 0 4px;',
+  h2: FONT + ' font-size:16px; color:#12283a; border-bottom:1px solid #d8d3c4; padding-bottom:6px; margin:30px 0 12px;',
+  toc: FONT + ' font-size:13px; color:#5b6b74;',
+  table: FONT + ' width:100%; border-collapse:collapse; font-size:13px; margin-bottom:4px;',
+  th: 'border:1px solid #d8d3c4; padding:7px 9px; text-align:left; vertical-align:top; background:#eef1ea; font-size:11px; text-transform:uppercase; letter-spacing:0.04em; color:#12283a;',
+  thCenter: 'border:1px solid #d8d3c4; padding:7px 9px; text-align:center; vertical-align:top; background:#eef1ea; font-size:11px; text-transform:uppercase; letter-spacing:0.04em; color:#12283a;',
+  td: 'border:1px solid #d8d3c4; padding:7px 9px; text-align:left; vertical-align:top;',
+  tdCenter: 'border:1px solid #d8d3c4; padding:7px 9px; text-align:center; vertical-align:top;',
+  mismatchBg: 'background:#fbf1e4;',
+  fillIn: 'color:#b6742b; font-weight:700; background:#fbf1e4; padding:1px 5px; border-radius:2px;',
+  flagWarning: FONT + ' border-left:4px solid #b6742b; background:#fbf1e4; padding:10px 14px; margin-bottom:10px; font-size:13px;',
+  flagInfo: FONT + ' border-left:4px solid #3a6b4f; background:#eef4ee; padding:10px 14px; margin-bottom:10px; font-size:13px;',
+  strong: 'color:#12283a;',
+  dt: FONT + ' color:#5b6b74; font-size:13px;',
+  dd: FONT + ' margin:0; font-size:13px;',
+  dl: FONT + ' display:grid; grid-template-columns:max-content 1fr; gap:6px 20px; font-size:13px; margin:0;',
+  ul: FONT + ' font-size:13px; padding-left:18px;',
+};
+
+// Renders a table/snapshot value: if it's empty, or already a bracketed
+// [PLEASE FILL IN...] marker, it's shown highlighted so a PM can spot at a
+// glance exactly what still needs to be filled in by hand.
+function cell(v, hint) {
+  const val = (v ?? '').toString().trim();
+  if (!val) return `<span style="${ST.fillIn}">[PLEASE FILL IN\u2014${hint || 'not captured, check source documents'}]</span>`;
+  if (/^\[.*\]$/.test(val)) return `<span style="${ST.fillIn}">${esc(val)}</span>`;
+  return esc(val);
+}
+
+function render(summary) {
+  const snapshotRows = Object.entries(summary.dealSnapshot || {})
+    .map(([k, v]) => `<dt style="${ST.dt}">${esc(k)}</dt><dd style="${ST.dd}">${cell(v)}</dd>`).join('');
+
+  // Shared row renderer: products, interfaces, and data migration all use the same
+  // cross-reference shape. The Name/Description column here is sourced from the curated
+  // SKU dictionary (see codeProducts above), not raw extracted text — Notes is still
+  // dropped for Products/Data Migration since that's the part that was coming out wrong
+  // (truncated/merged text), while the Name itself is reliable. Interfaces keeps its own
+  // Type/Direction column instead, since that comes from a much tighter regex anchor than
+  // free-form description prose does.
+  function crossRefRows(items, opts = {}) {
+    return (items || []).map((p) => {
+      const flagHtml = p.mismatch
+        ? ` <span style="${ST.fillIn}" title="` + esc(p.mismatch) + '">\u26a0 MISMATCH</span>'
+        : (p.unverifiable ? ' <span title="Order Form unavailable/unreadable \u2014 Dealbook claim unverified">? unverified</span>' : '');
+      const rowBg = p.mismatch ? ST.mismatchBg : '';
+      const firstTd = ST.td + rowBg + (p.mismatch ? ' font-weight:700;' : '');
+      const otherTd = ST.td + rowBg;
+      const centerTd = ST.tdCenter + rowBg;
+      const descCol = opts.showDescription ? `<td style="${otherTd}">${cell(p.description, 'not captured')}</td>` : '';
+      const notesCol = opts.showNotes ? `<td style="${otherTd}">${cell(p.notes, 'not captured')}</td>` : '';
+      const orderFormCol = opts.hideOrderForm ? '' : `<td style="${centerTd}">${check(p.inOrderForm)}</td>`;
+      return `
+      <tr>
+        <td style="${firstTd}">${esc(p.item)}${flagHtml}</td>
+        ${descCol}${notesCol}
+        <td style="${centerTd}">${check(p.inSOW)}</td>
+        ${orderFormCol}
+        <td style="${centerTd}">${check(p.inDealbook)}</td>
+      </tr>`;
+    }).join('');
+  }
+
+  const productRows = crossRefRows(summary.products, { showDescription: true });
+  const dataMigrationRows = crossRefRows(summary.dataMigration, { showDescription: true });
+  const interfaceRows = crossRefRows(summary.interfaces, { showNotes: true, hideOrderForm: true });
+
+  const flagBlocks = (summary.discrepancies || []).map((d) => `
+    <div style="${d.severity === 'info' ? ST.flagInfo : ST.flagWarning}">
+      <strong style="${ST.strong}">${esc(d.title)}:</strong> ${esc(d.detail)}
+    </div>`).join('');
+
+  // The SOW's own Data Migration table (Type / Legacy System / Scope) is a different, and
+  // useful, angle on the same topic — shown as supporting context under the main
+  // cross-reference table rather than merged into it, since matching a SOW row like
+  // "Advanced Reports" to a Dealbook code like "DCM ARP" by keyword is too fragile to
+  // assert as a firm reconciliation.
+  const sowMigrationRows = (summary.sowDataMigration || []).map((m) => `
+    <tr><td style="${ST.td}">${esc(m.type)}</td><td style="${ST.td}">${esc(m.legacySystem)}</td><td style="${ST.td}">${esc(m.scope)}</td></tr>`).join('');
+
+  const timelineRows = (summary.timeline || []).map((t) => `
+    <tr><th style="${ST.th}">${esc(t.label)}</th><td style="${ST.td}">${cell(t.value)}</td></tr>`).join('');
+
+  const sourceItems = (summary.sources || []).map((s) => `<li>${esc(s)}</li>`).join('');
+
+  const ATTACH_LABELS = { orderForm: 'Order Form', sow: 'SOW', dealbook: 'Dealbook' };
+  const attachItems = Object.entries(slotFiles).map(([key, file]) => {
+    if (file) {
+      const url = URL.createObjectURL(file);
+      return `<li><a href="${url}" download="${esc(file.name)}">${esc(file.name)}</a> \u2014 download this, then drag it onto the pasted Confluence page to attach it</li>`;
+    }
+    if (slots[key]) {
+      return `<li>${ATTACH_LABELS[key]}: text was pasted directly, no original file to attach</li>`;
+    }
+    return `<li>${ATTACH_LABELS[key]}: <span style="${ST.fillIn}">[PLEASE FILL IN\u2014no file provided]</span></li>`;
+  }).join('');
+
+  document.getElementById('pageShell').innerHTML = `
+    <h1 style="${ST.h1}">${cell(summary.title, 'agency name not found')}</h1>
+    <p style="${ST.toc}">Deal snapshot &middot; Products and services in scope &middot; Discrepancies across Order Form / SOW / Dealbook &middot; Interfaces &middot; Data migration &middot; Timeline &middot; Source documents &middot; Files to attach</p>
+
+    <h2 style="${ST.h2}">Deal snapshot</h2>
+    <dl style="${ST.dl}">${snapshotRows}</dl>
+
+    <h2 style="${ST.h2}">Products and services in scope</h2>
+    <table style="${ST.table}">
+      <thead><tr><th style="${ST.th}">Item</th><th style="${ST.th}">Description</th><th style="${ST.thCenter}">In SOW?</th><th style="${ST.thCenter}">In Order Form?</th><th style="${ST.thCenter}">In Dealbook?</th></tr></thead>
+      <tbody>${productRows}</tbody>
+    </table>
+
+    <h2 style="${ST.h2}">Discrepancies across Order Form / SOW / Dealbook</h2>
+    ${flagBlocks || '<p>None flagged.</p>'}
+
+    <h2 style="${ST.h2}">Interfaces</h2>
+    ${interfaceRows ? `
+    <table style="${ST.table}">
+      <thead><tr><th style="${ST.th}">Name</th><th style="${ST.th}">Type / Direction</th><th style="${ST.thCenter}">In SOW?</th><th style="${ST.thCenter}">In Dealbook (Scoping)?</th></tr></thead>
+      <tbody>${interfaceRows}</tbody>
+    </table>` : '<p>No named interfaces found in the SOW or the Dealbook\'s Scoping Assessment.</p>'}
+
+    <h2 style="${ST.h2}">Data migration</h2>
+    ${dataMigrationRows ? `
+    <table style="${ST.table}">
+      <thead><tr><th style="${ST.th}">Item</th><th style="${ST.th}">Description</th><th style="${ST.thCenter}">In SOW?</th><th style="${ST.thCenter}">In Order Form?</th><th style="${ST.thCenter}">In Dealbook?</th></tr></thead>
+      <tbody>${dataMigrationRows}</tbody>
+    </table>` : '<p>No data migration line items found in the Dealbook.</p>'}
+    ${sowMigrationRows ? `
+    <p style="${FONT} font-size: 13px; color: #5b6b74; margin-top: 14px;">The SOW's own Data Migration table, for reference:</p>
+    <table style="${ST.table}">
+      <thead><tr><th style="${ST.th}">Migration type</th><th style="${ST.th}">Legacy system</th><th style="${ST.th}">Scope</th></tr></thead>
+      <tbody>${sowMigrationRows}</tbody>
+    </table>` : ''}
+
+    <h2 style="${ST.h2}">Timeline</h2>
+    <table style="${ST.table}"><tbody>${timelineRows}</tbody></table>
+
+    <h2 style="${ST.h2}">Source documents</h2>
+    <ul style="${ST.ul}">${sourceItems}</ul>
+
+    <h2 style="${ST.h2}">Files to attach</h2>
+    <p style="${FONT} font-size: 13px; color: #5b6b74;">Pasting into Confluence copies the text and tables above, but not the original files themselves \u2014 attach these separately:</p>
+    <ul style="${ST.ul}">${attachItems}</ul>
+  `;
+
+  document.getElementById('output').style.display = 'block';
+  document.getElementById('output').scrollIntoView({ behavior: 'smooth' });
+}
+
+document.getElementById('copyBtn').addEventListener('click', async () => {
+  const html = document.getElementById('pageShell').innerHTML;
+  const copyStatus = document.getElementById('copyStatus');
+  try {
+    const blob = new Blob([html], { type: 'text/html' });
+    await navigator.clipboard.write([new ClipboardItem({ 'text/html': blob })]);
+    copyStatus.textContent = 'Copied — paste (Ctrl/Cmd+V) into a blank Confluence page.';
+  } catch (err) {
+    copyStatus.textContent = 'Clipboard blocked by the browser — try the download button instead.';
+    console.error(err);
+  }
+});
+
+document.getElementById('downloadBtn').addEventListener('click', () => {
+  const html = '<!DOCTYPE html><html><head><meta charset="utf-8"></head><body>' +
+    document.getElementById('pageShell').innerHTML + '</body></html>';
+  const blob = new Blob([html], { type: 'text/html' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'project-summary.html';
+  a.click();
+});
+
+// ---- "Any files → Confluence" pipeline, powered by the Claude API with the ----
+// ---- Atlassian MCP connector attached, so Claude creates the pages directly. ----
+//
+// This is genuinely different from the offline regex reconciliation above: instead of
+// pattern-matching known SKU codes and table layouts, it hands the raw extracted text
+// straight to Claude and lets it both draft the page content AND call the Confluence
+// tool to create it. That makes it far more general (works on any document, not just
+// Mark43's Order Form/SOW/Dealbook trio) but it is still a language model reading text —
+// it can misread a number or miss a row, especially on OCR'd or badly-scanned source
+// files. Every created page is logged with a link so it can be spot-checked, and the
+// prompts explicitly forbid inventing facts not present in the source text.
+
+const aiFilesState = []; // { name, text, error? }
+
+document.getElementById('aiFiles').addEventListener('change', async (e) => {
+  const files = Array.from(e.target.files || []);
+  const listEl = document.getElementById('aiFileList');
+  listEl.textContent = 'Reading ' + files.length + ' file(s)\u2026';
+  aiFilesState.length = 0;
+  for (const file of files) {
+    try {
+      const result = await extractText(file);
+      const text = typeof result === 'string' ? result : result.text;
+      aiFilesState.push({ name: file.name, text });
+    } catch (err) {
+      aiFilesState.push({ name: file.name, text: '', error: err.message });
+    }
+  }
+  listEl.innerHTML = aiFilesState.map((f) => f.error
+    ? '\u26a0 ' + esc(f.name) + ' \u2014 could not read (' + esc(f.error) + ')'
+    : '\u2713 ' + esc(f.name) + ' (' + f.text.length.toLocaleString() + ' chars)'
+  ).join('<br>');
+});
+
+// Talks to this app's own backend (server.js), never to Anthropic or Confluence directly —
+// the backend holds both the Anthropic key and the Confluence API token.
+async function callServer(endpoint, body) {
+  const resp = await fetch(endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await resp.json().catch(() => null);
+  if (!resp.ok) {
+    // Surface the deepest error detail available (Anthropic's or Confluence's), not just
+    // the summary string, so a vague failure comes with enough to actually diagnose.
+    const nested = data && data.details && (data.details.error || (data.details.errors && data.details.errors[0]));
+    const fullMessage = [
+      (data && data.error) || ('Server error ' + resp.status),
+      nested ? '(' + (nested.type || 'detail') + ': ' + (nested.message || nested.title || JSON.stringify(nested)) + ')' : '',
+    ].filter(Boolean).join(' ');
+    throw new Error(fullMessage);
+  }
+  return data;
+}
+
+const ACCURACY_RULE = 'Only state facts that literally appear in the source text below \u2014 ' +
+  'never infer, guess, or fill in a plausible-sounding name, date, or number. Where the ' +
+  'source text doesn\u2019t say, write "not found in source documents" instead.';
+
+const XHTML_RULE = 'Return ONLY well-formed Confluence storage-format XHTML for the page body ' +
+  '(what goes inside the body \u2014 headings, paragraphs, tables, lists). Every tag must be ' +
+  'properly closed (self-close void elements like <br/>), properly nested, and any literal & ' +
+  'or < characters in text must be escaped as &amp; and &lt;. No markdown code fences, no ' +
+  '<html>/<head>/<body> wrapper, no commentary before or after.';
+
+const AI_SECTIONS = [
+  {
+    key: 'overview',
+    titleSuffix: '',
+    draftPrompt: (ctx) => 'Draft a project overview page for "' + ctx.projectTitle + '".\n' +
+      'Include: a project/deal snapshot table (customer/agency name, contract or order form ' +
+      'number, product scope, key dates, contract term, who signed) and a "Key Stakeholders" ' +
+      'table for both parties, built only from what appears in the source documents below.\n' +
+      ACCURACY_RULE + '\n' + XHTML_RULE + '\n\nSOURCE DOCUMENTS:\n' + ctx.sourceText,
+  },
+  {
+    key: 'scope',
+    titleSuffix: ' \u2013 Scope of Services & Deliverables',
+    draftPrompt: (ctx) => 'Draft a page covering every product, module, and service explicitly ' +
+      'named in the source documents (tables/lists), with what is included for each.\n' +
+      ACCURACY_RULE + '\n' + XHTML_RULE + '\n\nSOURCE DOCUMENTS:\n' + ctx.sourceText,
+  },
+  {
+    key: 'timeline',
+    titleSuffix: ' \u2013 Timeline & Phases',
+    draftPrompt: (ctx) => 'Draft a page covering project phases, milestones, durations, and ' +
+      'dates explicitly stated in the source documents. If none exist, say so plainly rather ' +
+      'than inventing a schedule.\n' + ACCURACY_RULE + '\n' + XHTML_RULE +
+      '\n\nSOURCE DOCUMENTS:\n' + ctx.sourceText,
+  },
+  {
+    key: 'migration',
+    titleSuffix: ' \u2013 Data Migration',
+    draftPrompt: (ctx) => 'Draft a page covering data migration types, legacy systems, scope, ' +
+      'and any explicit rules/defaults/exclusions stated in the source documents. If there is ' +
+      'no migration content, say so briefly rather than omitting the page.\n' + ACCURACY_RULE +
+      '\n' + XHTML_RULE + '\n\nSOURCE DOCUMENTS:\n' + ctx.sourceText,
+  },
+  {
+    key: 'roles',
+    titleSuffix: ' \u2013 Roles & Responsibilities',
+    draftPrompt: (ctx) => 'Draft a page with a table of named roles and responsibilities for ' +
+      'every party, exactly as stated in the source documents.\n' + ACCURACY_RULE + '\n' +
+      XHTML_RULE + '\n\nSOURCE DOCUMENTS:\n' + ctx.sourceText,
+  },
+];
+
+document.getElementById('aiPublishBtn').addEventListener('click', async () => {
+  const statusLine = document.getElementById('aiStatusLine');
+  const resultsEl = document.getElementById('aiResults');
+  const spaceKeyOrId = document.getElementById('aiSpaceKey').value.trim();
+  const projectTitle = document.getElementById('aiProjectTitle').value.trim();
+  resultsEl.innerHTML = '';
+  const log = (html) => { resultsEl.innerHTML += html; };
+
+  const readable = aiFilesState.filter((f) => f.text);
+  if (!readable.length) {
+    statusLine.className = 'status-line error';
+    statusLine.textContent = 'Add at least one readable file first.';
+    return;
+  }
+  if (!spaceKeyOrId || !projectTitle) {
+    statusLine.className = 'status-line error';
+    statusLine.textContent = 'Enter both a Confluence space key and a project title.';
+    return;
+  }
+
+  function sanitizeExtractedText(s) {
+    return String(s || '')
+      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
+      .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/g, '')
+      .replace(/(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '');
+  }
+
+  const sourceText = readable
+    .map((f) => '--- ' + f.name + ' ---\n' + sanitizeExtractedText(f.text))
+    .join('\n\n')
+    .slice(0, 100000);
+
+  const ctx = { spaceKeyOrId, projectTitle, sourceText };
+
+  statusLine.className = 'status-line';
+  statusLine.textContent = 'Creating overview page\u2026';
+
+  let parentId = null;
+  for (let i = 0; i < AI_SECTIONS.length; i++) {
+    const section = AI_SECTIONS[i];
+    const title = projectTitle + section.titleSuffix;
+    statusLine.textContent = 'Creating ' + (section.titleSuffix || 'overview') + '\u2026 (' + (i + 1) + '/' + AI_SECTIONS.length + ')';
+    try {
+      const page = await callServer('/api/publish-page', {
+        title,
+        spaceKeyOrId,
+        parentId: i === 0 ? undefined : parentId,
+        prompt: section.draftPrompt(ctx),
+      });
+      log('<div class="flag info"><strong>\u2713 ' + esc(title) + '</strong> \u2014 ' +
+        (page.url ? '<a href="' + esc(page.url) + '" target="_blank">' + esc(page.url) + '</a>' : 'created (id ' + esc(page.id) + ')') +
+        '</div>');
+      if (i === 0) parentId = page.id;
+    } catch (err) {
+      log('<div class="flag"><strong>' + esc(title) + ' \u2014 not created.</strong><br>' + esc(err.message) + '</div>');
+      if (i === 0) {
+        statusLine.className = 'status-line error';
+        statusLine.textContent = 'Overview page failed \u2014 stopping (child pages need it as a parent).';
+        return;
+      }
+    }
+  }
+
+  statusLine.textContent = 'Done \u2014 spot-check the created pages against the source documents.';
+});
+
+} catch (setupErr) {
+  console.error('Setup error:', setupErr);
+  const statusEl = document.getElementById('statusLine');
+  if (statusEl) {
+    statusEl.textContent = 'Setup error — the page didn\u2019t finish loading correctly: ' + setupErr.message;
+    statusEl.className = 'status-line error';
+  } else {
+    alert('Setup error — the page didn\u2019t finish loading correctly: ' + setupErr.message);
+  }
+}
+</script>
+</body>
+</html>
