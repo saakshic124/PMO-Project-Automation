@@ -1,26 +1,61 @@
 # Project Summary Builder
 
-Drop project files (SOW, order form, dealbook, anything) in the browser → Claude drafts a
-multi-page Confluence project space → you review/edit each draft → publish. The Anthropic API
-key lives only on the server; the browser never sees it.
-
-Two independent tools live in the same page:
-- **Order Form / SOW / Dealbook reconciliation** — the original offline, regex-based
-  cross-checker. No API calls, runs entirely in the browser.
-- **Any files → Confluence via Claude** — the new AI-powered flow described below.
+Drop project files (SOW, order form, dealbook, anything) in the browser → give it a title →
+Claude drafts a summary you can review (with real rendered tables, not raw markup) → publish
+to Confluence when it looks right. The Anthropic key and Confluence credentials live only on
+the server; the browser never sees them, and the person using it never has to know a
+Confluence space key or ID.
 
 ## Architecture
 
 ```
 Browser (public/index.html)
   → extracts text from uploaded PDFs/xlsx in-browser (pdf.js / xlsx.js / Tesseract OCR)
-  → POSTs prompt text to this app's own backend
+  → Step 1: POSTs prompt text to /api/draft, renders the result as a real preview
+    (tables render as tables, not raw markup) with an editable raw-HTML box underneath
+  → Step 2: POSTs the (possibly hand-edited) HTML to /api/publish-page, which writes
+    it to Confluence as-is — no re-drafting happens on publish
 Backend (server.js, Express)
-  → holds ANTHROPIC_API_KEY and (optionally) ATLASSIAN_OAUTH_TOKEN
-  → /api/draft    → plain Claude call, no tools, nothing written anywhere
-  → /api/publish  → Claude call with the Atlassian MCP connector attached server-side
-  → /api/mark43   → stub, not implemented yet (see "Next: Mark43 integration" below)
+  → holds ANTHROPIC_API_KEY and Atlassian API token
+  → /api/draft         → Claude call, grounded with domain context (see below), no
+                          Confluence write
+  → /api/publish-page   → { bodyHtml } publishes directly; { prompt } drafts first
+                          then publishes (kept for backward compatibility)
+  → /api/mark43         → stub, not implemented yet (see "Next: Mark43 integration" below)
+  → mark43-glossary.js    → static, hand-maintained notes on patterns/pitfalls seen
+                            across customer SOWs/Order Forms (template families,
+                            migration entity structure, naming variance to watch for)
+  → mark43-confluence.js  → fetches (and caches, 6h TTL) the live Mark43 Product SKU
+                            Catalogue Summary and per-state Standard Implementation
+                            Guide pages from Confluence, using the same API token as
+                            publishing. This is the canonical, current source of truth
+                            for SKU codes and state-standard bundles — treated as
+                            higher-confidence than anything inferred from customer
+                            documents alone. Degrades to a no-op if Confluence isn't
+                            configured or a fetch fails; drafting never breaks because
+                            of it.
 ```
+
+Every `/api/draft` call is grounded with both of the above layers, prepended ahead of
+the person's own prompt, before it ever reaches Claude. If you add a new agency's
+documents to your own review process, update `mark43-glossary.js` directly — no other
+code changes needed for that to take effect on the next draft.
+
+## The two-step flow
+
+1. **Generate draft** (Step 1) calls `/api/draft` only — nothing is written to Confluence.
+   The result renders inline as an actual formatted preview (headings, real `<table>`
+   elements with borders/striping, lists) so you can visually scan the deal snapshot,
+   product tables, and roles tables the way they'll actually look on the page.
+2. An expandable **"Show/edit raw HTML"** box underneath holds the exact Confluence
+   storage-format XHTML that will be published. Edit it directly if you spot something
+   wrong — the preview above it won't re-render live off your edits, but whatever is in
+   that box is exactly what goes to Confluence.
+3. **Publish to Confluence** sends whatever is currently in that box via
+   `/api/publish-page` — this does **not** re-run Claude, so an edit you made by hand
+   is preserved exactly.
+4. **Regenerate draft** re-runs Step 1 from scratch (e.g. after adding another file),
+   discarding any manual edits in the raw-HTML box.
 
 ## Run locally
 
@@ -35,17 +70,15 @@ npm start
 
 Open `http://localhost:3000`.
 
-`/api/draft` works as soon as `ANTHROPIC_API_KEY` is set. `/api/publish` additionally needs
-`ATLASSIAN_OAUTH_TOKEN` — see below.
+`/api/draft` works as soon as `ANTHROPIC_API_KEY` is set. Publishing additionally needs
+the Atlassian variables below — the same credentials also power the live Confluence
+context fetch in `mark43-confluence.js`, so setting them up once gets you both.
 
 ## Getting an Atlassian API token
 
-Confluence pages are created via Confluence's own REST API, authenticated with a plain
-Atlassian API token — not Anthropic's MCP connector. This needs nothing but a web browser:
-no Terminal, no Node, no OAuth popup flow. (An earlier version of this app used the MCP
-connector's OAuth path, which requires running a local tool that briefly listens on
-`localhost` to catch the OAuth redirect — not viable on a locked-down machine with no
-Terminal access. The API-token approach sidesteps that entirely.)
+Confluence pages are created (and, for domain context, read) via Confluence's own REST
+API, authenticated with a plain Atlassian API token — not Anthropic's MCP connector.
+This needs nothing but a web browser: no Terminal, no Node, no OAuth popup flow.
 
 1. Go to **id.atlassian.com/manage-profile/security/api-tokens** (log in with your Mark43
    Atlassian account)
@@ -63,6 +96,12 @@ the team, revoke it from the same page and generate a new one.
 space key (e.g. `~712020abc...`) in the "Confluence space key" field — the server resolves it
 to Confluence's internal numeric space ID automatically before creating the page.
 
+**Read access for domain context:** the same token is reused by `mark43-confluence.js` to
+read (never write) a handful of internal reference pages — the SKU Catalogue Summary and
+per-state Standard Implementation Guide pages — so make sure the account that created the
+token has view access to those spaces. If it doesn't, the live-context fetch just fails
+silently and drafting falls back to the static glossary alone; nothing breaks, but accuracy
+on brand-new SKUs or state bundles will lag until access is granted.
 
 ## Environment variables
 
@@ -72,9 +111,10 @@ to Confluence's internal numeric space ID automatically before creating the page
 | `ANTHROPIC_MODEL` | No | `claude-sonnet-5` | Swap models here, not in the frontend |
 | `MAX_TOKENS` | No | `4096` | Response length cap per call |
 | `PORT` | No | `3000` | |
-| `ATLASSIAN_SITE` | Only for Publish | — | Hostname only, e.g. `mark43.atlassian.net` |
-| `ATLASSIAN_EMAIL` | Only for Publish | — | Account that owns the API token |
-| `ATLASSIAN_API_TOKEN` | Only for Publish | — | From id.atlassian.com — see above |
+| `ATLASSIAN_SITE` | Only for Publish/live context | — | Hostname only, e.g. `mark43.atlassian.net` |
+| `ATLASSIAN_EMAIL` | Only for Publish/live context | — | Account that owns the API token |
+| `ATLASSIAN_API_TOKEN` | Only for Publish/live context | — | From id.atlassian.com — see above |
+| `ATLASSIAN_DEFAULT_SPACE` | Only for Publish | — | Space key or personal space key; the UI never asks for this |
 
 ## Deploying
 
@@ -111,13 +151,17 @@ Mark43's actual API docs/credentials. Once you have those, likely useful directi
 - Pull product catalog / order form data server-side instead of relying on an uploaded file
 
 Tell me what Mark43's API actually looks like (auth method, base URL, relevant endpoints) and
-I'll wire it in following the same pattern as `/api/draft` and `/api/publish` — credentials
-stay server-side, the browser only ever sends/receives plain data.
+I'll wire it in following the same pattern as `/api/draft` and `/api/publish-page` —
+credentials stay server-side, the browser only ever sends/receives plain data.
 
 ## On accuracy
 
 This is still an LLM reading text, not a deterministic parser — it will occasionally misread
 a number, name, or table row, especially on scanned/OCR'd documents. The two-phase draft →
-review → publish flow exists specifically so a mistake gets caught in an editable textarea
-before it reaches Confluence, not after. Treat every published page as a strong first draft to
-spot-check against the source documents, not a guaranteed-correct transcription.
+review → publish flow exists specifically so a mistake gets caught in the rendered preview
+(or the editable raw-HTML box beneath it) before it reaches Confluence, not after. Treat every
+published page as a strong first draft to spot-check against the source documents, not a
+guaranteed-correct transcription. `mark43-glossary.js` and the live Confluence context in
+`mark43-confluence.js` push accuracy further by grounding drafts in known patterns and
+current canonical SKU/bundle data, but neither replaces reading the actual source documents
+before hitting publish.

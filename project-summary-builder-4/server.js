@@ -1,6 +1,8 @@
 require('dotenv').config();
 const express = require('express');
 const path = require('path');
+const { MARK43_DOMAIN_GLOSSARY } = require('./mark43-glossary');
+const { getLiveDomainContext } = require('./mark43-confluence');
 
 const app = express();
 app.use(express.json({ limit: '15mb' })); // source text dumps can be large
@@ -15,6 +17,9 @@ const MAX_TOKENS = parseInt(process.env.MAX_TOKENS || '4096', 10);
 // Bearer token obtained via a local OAuth flow (needs Node + a browser hitting localhost on
 // the same machine), which isn't viable on a locked-down machine with no Terminal access.
 // A static API token needs nothing but a web browser to generate.
+//
+// This same token is reused by mark43-confluence.js to read (not write) a couple of
+// internal reference pages at draft time — no separate credential needed for that.
 const ATLASSIAN_SITE = process.env.ATLASSIAN_SITE || ''; // e.g. "mark43.atlassian.net"
 const ATLASSIAN_EMAIL = process.env.ATLASSIAN_EMAIL || '';
 const ATLASSIAN_API_TOKEN = process.env.ATLASSIAN_API_TOKEN || '';
@@ -117,12 +122,32 @@ function stripFences(s) {
 }
 
 // ---- Draft: plain text generation, no Confluence write. Useful standalone, and also what
-// ---- /api/publish-page calls internally before it writes anything. ----
+// ---- /api/publish-page calls internally before it writes anything (unless a pre-drafted
+// ---- bodyHtml is passed in, in which case drafting is skipped entirely — see below). ----
+//
+// Every draft is grounded with two layers of domain context, prepended ahead of the
+// person's own prompt:
+//   1. MARK43_DOMAIN_GLOSSARY — a static, hand-maintained file distilling patterns seen
+//      across customer SOWs/Order Forms (template families, migration entity structure,
+//      naming variance to watch for, etc.) — see mark43-glossary.js.
+//   2. Live Confluence context — the current SKU Catalogue Summary and per-state Standard
+//      Implementation Guides, fetched (and cached) at request time — see
+//      mark43-confluence.js. This is the canonical, current source of truth for SKU codes
+//      and state-standard bundles, so it's treated as higher-confidence than anything
+//      inferred purely from customer documents.
+// If Confluence isn't configured or the live fetch fails, layer 2 silently contributes
+// nothing — the static glossary alone is still a meaningful accuracy improvement on its
+// own, so a Confluence hiccup never breaks drafting.
 async function draftText(prompt) {
+  const liveContext = await getLiveDomainContext().catch((err) => {
+    console.warn('draftText: live Confluence context unavailable:', err.message);
+    return '';
+  });
+  const fullPrompt = [MARK43_DOMAIN_GLOSSARY, liveContext, prompt].filter(Boolean).join('\n\n');
   const data = await anthropicRequest({
     model: MODEL,
     max_tokens: MAX_TOKENS,
-    messages: [{ role: 'user', content: prompt }],
+    messages: [{ role: 'user', content: fullPrompt }],
   });
   return stripFences(textOf(data));
 }
@@ -141,13 +166,23 @@ app.post('/api/draft', async (req, res) => {
   }
 });
 
-// ---- Publish: draft the page body with Claude, then create it directly via Confluence's ----
-// ---- own REST API using a static API token. No MCP connector, no OAuth flow. ----
+// ---- Publish: create the page directly via Confluence's own REST API using a static ----
+// ---- API token. No MCP connector, no OAuth flow. ----
+//
+// Two modes, both handled by this one route:
+//   - { title, bodyHtml }        -> publish exactly this HTML, no drafting call at all.
+//                                    This is what the two-step "review, then publish" UI
+//                                    flow in index.html uses: the person already saw and
+//                                    optionally edited the draft from /api/draft, so this
+//                                    just writes whatever they approved.
+//   - { title, prompt }          -> draft it first (same as /api/draft), then publish the
+//                                    result. Kept for backward compatibility / any caller
+//                                    that wants one-shot draft+publish without a review step.
 app.post('/api/publish-page', async (req, res) => {
-  const { title, prompt, parentId } = req.body || {};
+  const { title, prompt, bodyHtml: providedBodyHtml, parentId } = req.body || {};
   const spaceKeyOrId = req.body && req.body.spaceKeyOrId ? req.body.spaceKeyOrId : ATLASSIAN_DEFAULT_SPACE;
-  if (!title || !prompt) {
-    return res.status(400).json({ error: 'Missing "title" or "prompt" in request body.' });
+  if (!title || (!prompt && !providedBodyHtml)) {
+    return res.status(400).json({ error: 'Missing "title" and either "bodyHtml" or "prompt" in request body.' });
   }
   if (!confluenceConfigured()) {
     return res.status(412).json({
@@ -162,9 +197,9 @@ app.post('/api/publish-page', async (req, res) => {
     });
   }
   try {
-    const bodyHtml = await draftText(prompt);
-    if (!bodyHtml.trim()) {
-      return res.status(502).json({ error: 'Claude returned an empty draft \u2014 nothing was sent to Confluence.' });
+    const bodyHtml = providedBodyHtml || (await draftText(prompt));
+    if (!bodyHtml || !bodyHtml.trim()) {
+      return res.status(502).json({ error: 'No content to publish \u2014 the draft was empty.' });
     }
     const page = await confluenceCreatePage({ title, spaceKeyOrId, parentId, bodyHtml });
     res.json(page);
