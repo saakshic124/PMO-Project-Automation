@@ -44,16 +44,36 @@ function confluenceAuthHeader() {
   return 'Basic ' + Buffer.from(raw, 'utf8').toString('base64');
 }
 
+// Wraps fetch() with a hard timeout via AbortController, so a slow or unresponsive remote
+// API (Confluence, in this app's case) can never cause a request to hang indefinitely with
+// no feedback to the person waiting on it.
+async function fetchWithTimeout(url, options = {}, timeoutMs = 10000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      const timeoutErr = new Error('Request to ' + url + ' timed out after ' + timeoutMs + 'ms.');
+      timeoutErr.status = 504;
+      throw timeoutErr;
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function confluenceRequest(pathSuffix, options = {}) {
   const url = 'https://' + ATLASSIAN_SITE + '/wiki/api/v2' + pathSuffix;
-  const resp = await fetch(url, {
+  const resp = await fetchWithTimeout(url, {
     method: options.method || 'GET',
     headers: {
       'Content-Type': 'application/json',
       Authorization: confluenceAuthHeader(),
     },
     body: options.body ? JSON.stringify(options.body) : undefined,
-  });
+  }, 10000);
   const data = await resp.json().catch(() => ({}));
   if (!resp.ok) {
     const err = new Error(
