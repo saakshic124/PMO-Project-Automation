@@ -257,6 +257,24 @@ app.post('/api/publish-page', async (req, res) => {
 // ---- Placeholder for the next step: Mark43 API integration. ----
 app.use('/api/mark43', require('./routes/mark43'));
 
+// ---- Diagnostic: list every Confluence space this API token can see, with its exact key. ----
+// Exists purely to solve "what's my actual space key" without guessing at formats or needing
+// a terminal/curl \u2014 just visit this URL in a browser once credentials are configured.
+// Read-only, no secrets exposed (keys/names/types only), safe to leave in place.
+app.get('/api/confluence-spaces', async (req, res) => {
+  if (!confluenceConfigured()) {
+    return res.status(412).json({ error: 'Atlassian credentials are not configured on this server.' });
+  }
+  try {
+    const data = await confluenceRequest('/spaces?limit=100');
+    const spaces = (data.results || []).map((s) => ({ id: s.id, key: s.key, name: s.name, type: s.type }));
+    res.json({ count: spaces.length, spaces });
+  } catch (err) {
+    console.error('confluence-spaces error:', err.data || err.message);
+    res.status(err.status || 500).json({ error: err.message, details: err.data });
+  }
+});
+
 app.get('/health', (req, res) => res.json({
   ok: true,
   model: MODEL,
