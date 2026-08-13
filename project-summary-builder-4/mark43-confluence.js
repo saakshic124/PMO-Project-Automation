@@ -87,9 +87,22 @@ function stripHtml(html) {
 async function fetchPageText(pageId) {
   const url =
     'https://' + ATLASSIAN_SITE + '/wiki/api/v2/pages/' + pageId + '?body-format=storage';
-  const resp = await fetch(url, {
-    headers: { Authorization: authHeader(), Accept: 'application/json' },
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  let resp;
+  try {
+    resp = await fetch(url, {
+      headers: { Authorization: authHeader(), Accept: 'application/json' },
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err.name === 'AbortError') {
+      throw new Error('Confluence fetch for page ' + pageId + ' timed out after 8s.');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
   if (!resp.ok) {
     throw new Error('Confluence fetch failed for page ' + pageId + ': ' + resp.status);
   }
@@ -135,9 +148,14 @@ async function getStateGuidesText() {
 
 // Main entry point for server.js. Returns a single text block ready to prepend to
 // a prompt, or '' if Confluence isn't configured / everything failed (safe no-op).
+// Hard-capped overall so a Confluence slowdown can only ever add a bounded delay to
+// drafting, never an unbounded one \u2014 individual page fetches already time out at
+// 8s each, but this belt-and-suspenders cap protects against any other slow step.
 async function getLiveDomainContext() {
   if (!confluenceConfigured()) return '';
-  const [skuText, stateText] = await Promise.all([getSkuCatalogText(), getStateGuidesText()]);
+  const overallTimeout = new Promise((resolve) => setTimeout(() => resolve(['', '']), 12000));
+  const fetchBoth = Promise.all([getSkuCatalogText(), getStateGuidesText()]);
+  const [skuText, stateText] = await Promise.race([fetchBoth, overallTimeout]);
   const combined = [
     skuText ? 'CANONICAL SKU CATALOG (live from Confluence, treat as current ground truth for SKU codes):\n' + skuText : '',
     stateText ? 'STATE STANDARD IMPLEMENTATION GUIDES (live from Confluence — the state-standard bundle baseline; an individual SOW/Order Form is still authoritative for what that specific agency purchased):\n' + stateText : '',
